@@ -1,3 +1,4 @@
+#include <CONIO.H>
 #include "CONFIGCL.H"
 #include "UTILS.H"
 #include "PARSER.H"
@@ -34,15 +35,12 @@ void ConfigClass::updateConfig()
 	removeChar(uploadfolder, '\n');
 
 	pausetime = atoi(pausetimestr);
-	replaced_word = replaceWord(downloadparams, "{DOWNLOAD}", downloadfolder);
-	strcpy(downloadparams, replaced_word);
-	free(replaced_word);
-	replaced_word = replaceWord(uploadparams, "{UPLOAD}", uploadfolder);
-	strcpy(uploadparams, replaced_word);
-	free(replaced_word);
+	replaceSubstring(downloadparams, "{DOWNLOAD}", downloadfolder);
+	replaceSubstring(uploadparams, "{UPLOAD}", uploadfolder);
 }
 
 void ConfigClass::setLocalPath(char *path)
 {
-	strcpy(localpath, replaceWord(path, "ZMGR.EXE", ""));
+	replaceSubstring(path, "ZMGR.EXE", "");
+	strcpy(localpath, path);
 }
