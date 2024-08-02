@@ -1,102 +1,126 @@
 #include <CONIO.H>
 #include <DOS.H>
 #include <STDIO.H>
-#include "PARSER.H"
-#include "SECRETS.H"
-#include "UTILS.H"
 #include "CONFIGCL.H"
-#include "TRANSFER.H"
-#include "EXECPGM.H"
+#include "PROCMAN.H"
+
+void titlescreen()
+{
+	clrscr();
+	println("[Public Domain Zmodem] [Manager]");
+	println(" Public Domain Zmodem by Peter Mandrella, 1994-1998");
+	println(" ZMGR Version 2.0.13 ZModem - Manager");
+	println(" Written in Borland C++ 3.1 by Kevin Carr, 2022");
+	println(" Updated July 2024: Added auto up/down automation");
+	println(" This is a MS-DOS program");
+	println(" All actions handled by the ZMMGR.CFG file\n");
+}
+
+void printhelp()
+{
+	titlescreen();
+	println("#### - FORWARDING FILES GO INTO UPLOAD FOLDER! - ####");
+	println("#### - Use [ZMGR.EXE run] to run normally");
+	println("#### - Use [ZMGR.EXE -f] <NAMEOFCOMPUTER> to create forward file");
+	println("#### - Use [ZMGR.EXE -i] (interactive) asks for <NAMEOFCOMPUTER>");
+}
+
+void createfilelistfile()
+{
+	ConfigClass *config = ConfigClass::getinstance();
+	char filename[MAX_FILE_SIZE] = {"\0"};
+	char fullfilename[MAX_FILE_SIZE] = {"\0"};
+
+	titlescreen();
+	println("");
+	println("This will create a forwarding file for a computer");
+	println("in the %s upload directory",
+			config->getconfigvalue(UPLOADFOLDER));
+
+	println("Enter the name of computer which will receive the files:");
+	gets(filename);
+	sprintf(fullfilename, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), filename);
+	to_upper_case(fullfilename);
+	listdirectory2file(config->getconfigvalue(UPLOADFOLDER), fullfilename, FALSE, ".FIL");
+	appendstring2file(fullfilename, fullfilename);
+}
+
+int runzmgr(char *path)
+{
+	ProcessManager *procman = new ProcessManager();
+	ConfigClass *config = ConfigClass::getinstance();
+
+	procman->set_local_path(path);
+	titlescreen();
+
+	delay(3000);
+
+	createdirectory(config->getconfigvalue(DOWNLOADFOLDER));
+	createdirectory(config->getconfigvalue(UPLOADFOLDER));
+	createdirectory(config->getconfigvalue(KEEPFOLDER));
+
+	procman->execute_main_loop();
+	return 0;
+}
 
 int main(int argc, char *argv[])
 {
-	SecretThings *secretThings;
-	int keychr;
-	ConfigClass *config;
-	Transfer *tranfer;
-	ExecPgm *epgm;
-	int setbreak = 0;
+	char filename[MAX_FILE_SIZE] = {"\0"};
+	char argval[MAX_FILENAME_LENGTH] = {"\0"};
+	ConfigClass *config = ConfigClass::getinstance();
 
-	secretThings = new SecretThings();
-	config = new ConfigClass();
-	tranfer = new Transfer();
-	epgm = new ExecPgm();
-
-	if (argc > 0)
-		config->setLocalPath(argv[0]);
-
-	clrscr();
-	printf("[Public Domain Zmodem] [Manager]\n");
-	printf(" Public Domain Zmodem by Peter Mandrella, 1994-1998\n");
-	printf(" Manager by Kevin Carr, 2022\n\n");
-	printf(" This is a MS-DOS program\n");
-	printf(" All actions handled by the ZM.CFG file\n\n");
-	delay(3000);
-
-	while (1)
+	if (argc >= 2)
 	{
-		/***
-		 * This is for the PDZM program
-		 */
-		if (strcmp(config->startupstate, DOWNLOAD) == 0)
-		{
-			printf("Entering Download Processing\n");
-			tranfer->DownloadOperations(config);
-			printf("Exiting Download Processing\n");
-		}
-		else // We are UPLOADING
-		{
-			tranfer->UploadOperations(config);
-		}
+		strcpy(argval, argv[1]);
+		to_upper_case(argval);
 
-		if ((config->onceexec[0] != '\0'))
+		// Check for the -f flag and call processFile
+		if (strcmp(argval, "-F") == 0)
 		{
-			printf("Executing onceexec [%s] with [%s]\n", config->onceexec, config->downloadparams);
-			epgm->execprogram(config->onceexec, config->downloadparams);
-		}
-
-		if (config->oncedoscommand[0] != '\0')
-		{
-			if (epgm->execdoscommand(config->oncedoscommand) == -1)
-				perror("Error Executing DOS Command\n");
-			remove_config_file_value("ZM.CFG", "ONCEDOSCOMMAND");
-		}
-
-		if (config->zmgrsecret != '\0')
-		{
-			secretThings->dosecretthings(config->zmgrsecret);
-		}
-
-		//		MEMORY DEBUG STUFF:
-		//		if (epgm->execdoscommand("mem.exe /f") == -1)
-		//			perror("Error Executing DOS Command\n");
-
-		printf("PAUSING %d SECONDS\n", config->pausetime);
-		printf("'X' WILL END THIS MADNESS\n");
-		setbreak = 0;
-		for (int i = 0; i < (config->pausetime * 2); i++)
-		{
-			delay(500);
-
-			keychr = kbhit();
-			if (keychr != 0)
+			if (argv[2] != NULL)
 			{
-				char key = getch();
-				if (key == 'x' || key == 'X')
-				{
-					printf("Break Key Hit\n");
-					setbreak = 1;
-					break;
-				}
+				sprintf(filename, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), argv[2]);
+				to_upper_case(filename);
+				printf("CREATED FORWARDING FILE [%s]", filename);
+				listdirectory2file(config->getconfigvalue(UPLOADFOLDER), filename, TRUE, ".FIL");
+				appendstring2file(filename, filename);
 			}
-
-			if (setbreak == 1)
-				break;
+			else
+				println("ERROR IN COMMANDLINE - MISSING NAME");
+			return 0;
 		}
-
-		if (setbreak == 1)
-			break;
+		if (strcmp(argval, "-FF") == 0)
+		{
+			if (argv[2] != NULL)
+			{
+				sprintf(filename, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), argv[2]);
+				to_upper_case(filename);
+				printf("CREATED FORWARDING FILE [%s]", filename);
+				listdirectory2file(config->getconfigvalue(UPLOADFOLDER), filename, FALSE, ".FIL");
+				appendstring2file(filename, filename);
+			}
+			else
+				println("ERROR IN COMMANDLINE - MISSING NAME");
+			return 0;
+		}
+		else if (strcmp(argval, "-I") == 0)
+		{
+			createfilelistfile();
+			runzmgr(argv[0]);
+		}
+		else if (strcmp(argval, "RUN") == 0)
+		{
+			runzmgr(argv[0]);
+		}
+		else
+		{
+			void printhelp();
+			println("Invalid Option: %s", argval);
+			return 1;
+		}
 	}
+	else
+		printhelp();
 
 	return 0;
 }

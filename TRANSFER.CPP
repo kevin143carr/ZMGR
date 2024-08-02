@@ -1,73 +1,94 @@
 #include <CONIO.H>
 #include <DOS.H>
+#include <IOSTREAM.H>
 #include <STDIO.H>
 #include "TRANSFER.H"
 #include "UTILS.H"
 
 Transfer::Transfer()
 {
+	forwarding = 0;
 	epgm = new ExecPgm();
+	config = ConfigClass::getinstance();
 }
 
-void Transfer::DownloadOperations(ConfigClass *config)
+int Transfer::download_operations()
 {
-	config->updateConfig();
+	int returnval = 0;
 
-	if ((config->path[0] != '\0') && (config->downloadparams[0] != '\0'))
+	char movefile[MAX_CONFIG_SIZE] = {'\0'};
+	char downloadparams[MAX_CONFIG_SIZE] = {'\0'};
+	char downloadfolder[MAX_CONFIG_SIZE] = {'\0'};
+
+	strcpy(downloadparams, config->getconfigvalue(DOWNLOADPARAMS));
+	strcpy(downloadfolder, config->getconfigvalue(DOWNLOADFOLDER));
+
+	replacesubstring(downloadparams, "{DOWNLOAD}", downloadfolder);
+
+	if ((config->get_local_path()[0] != '\0') && (config->getconfigvalue(DOWNLOADPARAMS)[0] != '\0'))
 	{
 		// Execute the ZM program for download
-		if (epgm->execprogram(config->path, config->downloadparams) == -1)
-			printf("Execution Error\n");
-		else
+
+		returnval = epgm->execprogram(config->getconfigvalue(EXECPATH), downloadparams);
+		if (returnval == -1)
 		{
-			char checkfile[100] = {'\0'};
-			char movefile[100] = {'\0'};
-			// check to see if a ZM.CFG was send and
-			// move it to the executable folder to be executed
-			sprintf(checkfile, "%s\\ZM.CFG", config->downloadfolder);
-			if (check_for_file(checkfile) > -1)
-			{
-				sprintf(movefile, "move %s %s /Y", checkfile, config->localpath);
-				printf("ZM.CFG Found moving file: %s\n", movefile);
-				epgm->execdoscommand(movefile);
-			}
+			returnval = -1;
+			println("Execution Error");
+		}
+
+		// check to see if a ZMMGR.CFG was send and
+		// move it to the executable folder to be executed
+		sprintf(movefile, "%s\\ZMMGR.CFG", config->getconfigvalue(DOWNLOADPARAMS));
+		if (fileexists(movefile) != -1)
+		{
+			sprintf(movefile, "move %s %s /Y", movefile, config->get_local_path());
+			println("ZMMGR.CFG Found moving file: %s", movefile);
+			epgm->execdoscommand(movefile);
 		}
 	}
-	else
-		printf("One must fill in the gaps, in order to not fail\n");
+
+	return returnval;
 }
 
-void Transfer::UploadOperations(ConfigClass *config)
+int Transfer::uploadfiles(char *uploadparams)
 {
-	char checkfile[100] = {'\0'};
-	char *file_list[MAX_FILES];
-	int count = 0;
+	int returnval = 0;
 
-	config->updateConfig();
-	sprintf(checkfile, "%s\\*.*", config->uploadfolder);
-	count = get_files_in_directory(checkfile, file_list);
-	(count > 0) ? printf("[Upload File Count = %d]\n", count) : printf("[Skipping Upload Operations]\n", count);
+	//println("upload params = %s", uploadparams);
 
-	if (count > 0)
+	returnval = epgm->execprogram(config->getconfigvalue(EXECPATH), uploadparams);
+	// Execute the ZM program for upload
+	if (returnval == -1)
 	{
-
-		// Execute the ZM program for upload
-		if (epgm->execprogram(config->path, config->uploadparams) == -1)
-			perror("Error executing download\n");
-		else
-		{
-			for (int i = 0; i < count; i++)
-			{
-				sprintf(checkfile, "%s\\%s", config->uploadfolder, file_list[i]);
-				printf("Removing File %s\n", checkfile);
-				if (remove(checkfile) == -1)
-					perror(checkfile);
-			}
-		}
+		perror("Error executing download\n");
+		perror("the files will be deleted in the upload folder\n");
 	}
 
-	for (int i = 0; i < count; i++)
-		free(file_list[i]);
+	return returnval;
+}
 
-	free(file_list);
+int Transfer::upload_operations(char *filename)
+{
+	char uploadparams[MAX_CONFIG_SIZE] = {"\0"};
+	char uploadfolder[MAX_CONFIG_SIZE] = {"\0"};
+	int returnval = TRUE;
+
+	strcpy(uploadparams, config->getconfigvalue(UPLOADPARAMS));
+
+	if (filename == NULL)
+	{ // No files listed in a .FIL text file
+		strcpy(uploadfolder, config->getconfigvalue(UPLOADFOLDER));
+		replacesubstring(uploadparams, "{UPLOAD}", uploadfolder);
+		returnval = uploadfiles(uploadparams);
+	}
+	else
+	{ // Files listed in a .FIL text file
+		memset(uploadparams, 0, MAX_CONFIG_SIZE);
+		strcpy(uploadparams, config->getconfigvalue(FORWARDPARAMS));
+		replacesubstring(uploadparams, "{FORWARD}", filename);
+
+		returnval = uploadfiles(uploadparams);
+	}
+
+	return returnval;
 }

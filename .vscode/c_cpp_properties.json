@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "MSDOS",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/Volumes/WindowsShare/MSDOS/C_DRIVE/BC/INCLUDE/**",
+                "/Volumes/WindowsShare/MSDOS/C_DRIVE/PROJECTS/ZMGR/**"
+            ],
+            "defines": [],
+            "compilerPath": "/Volumes/WindowsShare/MSDOS/C_DRIVE/BC/BIN/BCC.exe",
+            "cStandard": "c89",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "${default}",
+            "browse": {
+                "path": [
+                    "/Volumes/WindowsShare/MSDOS/C_DRIVE/PROJECTS/ZMGR/*"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+        }
+    ],
+    "version": 4
+}

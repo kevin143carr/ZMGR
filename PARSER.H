@@ -7,8 +7,7 @@
 #include <STRING.H>
 #include <SYS/STAT.H>
 
-#define MAX_LINES 100
-#define MAX_LEN 100
+#include "DEFINES.H"
 
 static void remove_config_file_value(char *path, char *key)
 {
@@ -45,12 +44,13 @@ static void remove_config_file_value(char *path, char *key)
     fclose(fptr);
 }
 
-static void get_config_file_value(char *path, char *key, char *value)
+static void get_config_file_value(char *path, const char *key, char *value)
 {
     FILE *fptr;
-    char line[100];
+    char line[MAX_CONFIG_SIZE];
 
-    memset(line, 0, sizeof(line));
+    memset(line, 0, MAX_CONFIG_SIZE);
+    memset(value, 0, MAX_CONFIG_SIZE);
 
     if ((fptr = fopen(path, "r+")) == NULL)
     {

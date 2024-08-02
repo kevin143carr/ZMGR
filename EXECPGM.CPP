@@ -3,36 +3,16 @@
 int ExecPgm::execprogram(const char *path, char *args)
 {
 	int status = -1;
-	char *arglist[MAX_ARGS];
-	int argcount = 0;
-	char *argholder = strdup(args);
 
-	argcount = splitIntoArray(args, " ", arglist);
-	if (argcount > 0)
+	//println("Executing %s with %s", path, args);
+
+	status = spawnl(P_WAIT, (char *)path, (char *)path, args, NULL);
+	if (status == -1)
 	{
-		// DEBUG
-		//	printf("Executing Spawn with %d args: \n", argcount);
-		//	for(int i =0; i < argcount; i++)
-		//		printf("%s ", arglist[i]);
-		//	printf("\n");
-		//	getch();
-		status = spawnv(P_WAIT, (char *)path, arglist);
-		if (status == -1)
-		{
-			char errorstr[100];
-			sprintf(errorstr, "Error Spawning %s with %s\n", path, args);
-			perror(errorstr);
-		}
+		char errorstr[100];
+		sprintf(errorstr, "Error Spawning %s with %s\n", path, args);
+		perror(errorstr);
 	}
-
-	for (int i = 0; i < argcount; i++)
-	{
-		free(arglist[i]);
-	}
-
-	free(arglist);
-	strcpy(args, argholder);
-	free(argholder);
 
 	return status;
 }

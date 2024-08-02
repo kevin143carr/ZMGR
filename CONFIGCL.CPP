@@ -3,44 +3,61 @@
 #include "UTILS.H"
 #include "PARSER.H"
 
-ConfigClass::ConfigClass()
+ConfigClass *ConfigClass::instance = 0;
+
+// Define the array to hold the mapping of enums to strings
+const ConfigClass::CategoryString ConfigClass::categoryStrings[] = {
+    { COMPUTERNAME, "COMPUTERNAME" },
+    { FORWARDTO, "FORWARDTO" },
+    { STARTUPSTATE, "STARTUPSTATE" },
+    { PAUSETIME, "PAUSETIME" },
+    { DOWNLOADFOLDER, "DOWNLOADFOLDER" },
+    { UPLOADFOLDER, "UPLOADFOLDER" },
+    { KEEPFOLDER, "KEEPFOLDER" },
+    { EXECPATH, "EXECPATH" },
+    { DOWNLOADPARAMS, "DOWNLOADPARAMS" },
+    { UPLOADPARAMS, "UPLOADPARAMS" },
+    { FORWARDPARAMS, "FORWARDPARAMS" },
+    { ONCEEXEC, "ONCEEXEC" },
+    { ONCEDOSCOMMAND, "ONCEDOSCOMMAND" },
+    { ZMGRSECRET, "ZMGRSECRET" }
+};
+
+const char *ConfigClass::getCategoryName(Category category)
 {
-	updateConfig();
+    for (int i = 0; i < sizeof(categoryStrings) / sizeof(CategoryString); ++i) {
+        if (categoryStrings[i].category == category) {
+            return categoryStrings[i].name;
+        }
+    }
+    return "Unknown";
 }
 
-void ConfigClass::updateConfig()
+Category ConfigClass::getCategoryFromName(const char *name)
 {
-	char *replaced_word;
-
-	get_config_file_value("ZM.CFG", "EXECPATH", path);
-	get_config_file_value("ZM.CFG", "ONCEEXEC", onceexec);
-	get_config_file_value("ZM.CFG", "DOWNLOADPARAMS", downloadparams);
-	get_config_file_value("ZM.CFG", "UPLOADPARAMS", uploadparams);
-	get_config_file_value("ZM.CFG", "STARTUPSTATE", startupstate);
-	get_config_file_value("ZM.CFG", "PAUSETIME", pausetimestr);
-	get_config_file_value("ZM.CFG", "ZMGRSECRET", zmgrsecret);
-	get_config_file_value("ZM.CFG", "ONCEDOSCOMMAND", oncedoscommand);
-	get_config_file_value("ZM.CFG", "DOWNLOADFOLDER", downloadfolder);
-	get_config_file_value("ZM.CFG", "UPLOADFOLDER", uploadfolder);
-
-	removeChar(path, '\n');
-	removeChar(onceexec, '\n');
-	removeChar(downloadparams, '\n');
-	removeChar(uploadparams, '\n');
-	removeChar(startupstate, '\n');
-	removeChar(pausetimestr, '\n');
-	removeChar(zmgrsecret, '\n');
-	removeChar(oncedoscommand, '\n');
-	removeChar(downloadfolder, '\n');
-	removeChar(uploadfolder, '\n');
-
-	pausetime = atoi(pausetimestr);
-	replaceSubstring(downloadparams, "{DOWNLOAD}", downloadfolder);
-	replaceSubstring(uploadparams, "{UPLOAD}", uploadfolder);
+    for (int i = 0; i < sizeof(categoryStrings) / sizeof(CategoryString); ++i) {
+        if (strcmp(categoryStrings[i].name, name) == 0) {
+            return categoryStrings[i].category;
+        }
+    }
+    return NOTFOUND;
 }
 
-void ConfigClass::setLocalPath(char *path)
+char *ConfigClass::getconfigvalue(Category category)
 {
-	replaceSubstring(path, "ZMGR.EXE", "");
+    memset(configitem, 0, MAX_CONFIG_SIZE);
+	get_config_file_value("ZMMGR.CFG", getCategoryName(category), configitem);
+    remove_char(configitem,'\n');
+    return configitem;
+}
+
+void ConfigClass::set_local_path(char *path)
+{
+	replacesubstring(path, "ZMGR.EXE", "");
 	strcpy(localpath, path);
+}
+
+char *ConfigClass::get_local_path()
+{
+    return localpath;
 }

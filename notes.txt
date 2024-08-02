@@ -1,0 +1,10 @@
+July 4th 2024 program size standard build = 150,161
+    reduced to 149,390 by removing static memory in functions.
+    reduced to 148,410 by removing unnecessary printf statements.
+    Another problem area is the static memory in configcl.cpp - Fixing!
+
+July 6th 2024 program size standard build = 158,789
+    increased size by using memory managerment class.
+    It works better, but the foot print is bigger.
+
+    Removed unused code build = 149,841

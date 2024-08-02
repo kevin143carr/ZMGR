@@ -23,3 +23,7 @@ void SecretThings::dosecretthings(char *zmgrsecret)
 	if (strstr(zmgrsecret, "WAIT"))
 		dosecretwait(zmgrsecret);
 }
+
+SecretThings::SecretThings()
+{
+}

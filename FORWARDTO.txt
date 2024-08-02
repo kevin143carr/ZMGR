@@ -1,0 +1,9 @@
+This is how FORWARDTO should work.
+1.  ZMGR is in receiving mode.
+2.  ZMGR receives a file with the .FIL extension.
+3.  The .FIL should have a name associated to it like MELBA.FIL.
+4.  MELBA would be the name of the computer this file is going to.
+5.  If current ZMGR is not computer named MELBA it will forward on to the next computer
+    by uploading it to its upload port.
+6.  The next ZMGR will receive it.  If it matches the .FIL name then it would keep
+    the file, otherwise it would forward onto its upload port.

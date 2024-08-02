@@ -7,10 +7,13 @@ class Transfer
 {
 private:
     ExecPgm *epgm;
+    ConfigClass* config;
 
 public:
+    int forwarding;
     Transfer();
-    void UploadOperations(ConfigClass *config);
-    void DownloadOperations(ConfigClass *config);
+    int uploadfiles(char* uploadparams);
+    int upload_operations(char* filename);
+    int download_operations();
 };
 #endif

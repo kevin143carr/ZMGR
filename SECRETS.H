@@ -1,3 +1,6 @@
+#ifndef SECRETS_H_INCLUDED
+#define SECRETS_H_INCLUDED
+
 class SecretThings
 {
 private:
@@ -5,4 +8,6 @@ private:
 
 public:
     void dosecretthings(char *zmgrsecret);
+    SecretThings();
 };
+#endif

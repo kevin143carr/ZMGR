@@ -4,6 +4,7 @@
 #include <CONIO.H>
 #include <STDIO.H>
 #include <PROCESS.H>
+#include <STRING.H>
 #include "UTILS.H"
 
 class ExecPgm
