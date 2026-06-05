@@ -22,13 +22,29 @@ Important keys:
 
 ## Controls
 
-During the loop pause:
+`ZMGR.EXE run` opens a startup menu:
+
+- `1`: Manager Forwarding, the original continuous upload/download/forwarding loop.
+- `2`: Auto Download, repeatedly launches PDZM receive mode and skips upload forwarding checks.
+- `3`: Serial Pass-through, bridges two selected COM ports byte-for-byte and watches for lightweight ZModem signatures.
+- `4`: Port Diagnostics, reports BIOS-listed COM ports, basic UART response, and mouse-driver presence.
+- `X`: exit.
+
+During the manager or auto-download loop pause:
 
 - `X`: exit ZMGR
 - `P`: pause
 - `C`: continue from pause
 
+During serial pass-through:
+
+- `X`: exit pass-through mode and return to the menu.
+
 After upload handling, ZMGR now returns to this keyboard window before scanning the upload folder again.
+
+## Serial Diagnostics
+
+Port diagnostics target real DOS hardware first. ZMGR reads the BIOS Data Area COM table for COM1-COM4 base addresses, then performs a small UART scratch-register check when a base address is present. Mouse diagnostics query INT 33h for driver presence and use the extended AX=0024h call when available to report mouse type and IRQ. Serial mouse IRQs are mapped to likely COM ports when only one BIOS-listed candidate exists. If the result is ambiguous and DOS 6.0 or newer is detected, ZMGR can run `MSD.EXE /P REPORT.TXT` and parse the report's `Mouse` section as a fallback.
 
 ## DOSBox-X Build And Run
 

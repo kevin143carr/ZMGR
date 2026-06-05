@@ -1,5 +1,50 @@
 #include "PROCMAN.H"
 
+int ProcessManager::pause_or_exit(void)
+{
+	println("PAUSING %s SECONDS", config->getconfigvalue(PAUSETIME));
+	println("'X' WILL END THIS MADNESS");
+	println("'P' WILL PAUSE");
+	println("'C' WILL CONTINUE FROM 'PAUSE'");
+
+	setbreak = 0;
+	int setpause = FALSE;
+	for (int i = 0; i < (atoi(config->getconfigvalue(PAUSETIME)) * 2); i++)
+	{
+		delay(500);
+
+		keychr = kbhit();
+		if (keychr != 0)
+		{
+			char key = getch();
+			if (key == 'x' || key == 'X')
+			{
+				printf("Break Key Hit\n");
+				setbreak = 1;
+				break;
+			}
+			if (key == 'p' || key == 'P')
+			{
+				println("PAUSED!!");
+				setpause = TRUE;
+			}
+			if (key == 'c' || key == 'C')
+			{
+				println("UN-PAUSED!!");
+				setpause = FALSE;
+			}
+		}
+
+		if (setpause == TRUE)
+			i = 0;
+
+		if (setbreak == 1)
+			break;
+	}
+
+	return setbreak;
+}
+
 void ProcessManager::execute_main_loop(void)
 {
 	int returnval = 0;
@@ -79,50 +124,53 @@ void ProcessManager::execute_main_loop(void)
 				int randpause = getrandomnumber(1000, (atoi(config->getconfigvalue(PAUSETIME)) * 1000));
 				println("PAUSING %d MS ...", randpause);
 				delay(randpause); */
-		println("PAUSING %s SECONDS", config->getconfigvalue(PAUSETIME));
-		println("'X' WILL END THIS MADNESS");
-		println("'P' WILL PAUSE");
-		println("'C' WILL CONTINUE FROM 'PAUSE'");
-
-		setbreak = 0;
-		int setpause = FALSE;
-		for (int i = 0; i < (atoi(config->getconfigvalue(PAUSETIME)) * 2); i++)
-		{
-			delay(500);
-
-			keychr = kbhit();
-			if (keychr != 0)
-			{
-				char key = getch();
-				if (key == 'x' || key == 'X')
-				{
-					printf("Break Key Hit\n");
-					setbreak = 1;
-					break;
-				}
-				if (key == 'p' || key == 'P')
-				{
-					println("PAUSED!!");
-					setpause = TRUE;
-				}
-				if (key == 'c' || key == 'C')
-				{
-					println("UN-PAUSED!!");
-					setpause = FALSE;
-				}
-			}
-
-			if (setpause == TRUE)
-				i = 0;
-
-			if (setbreak == 1)
-				break;
-		}
-
-		if (setbreak == 1)
+		if (pause_or_exit() == TRUE)
 			break;
 	}
-	fwdmanager->cleanupforwardmanager();
+}
+
+void ProcessManager::execute_auto_download_loop(void)
+{
+	while (1)
+	{
+		clrscr();
+		printf("AUTO DOWNLOAD :: I AM \"%s\" :: ", config->getconfigvalue(COMPUTERNAME));
+		monitormemory();
+		downmanager->begindownload();
+
+		if (config->getconfigvalue(ZMGRSECRET)[0] != '\0')
+			secretThings->dosecretthings(config->getconfigvalue(ZMGRSECRET));
+
+		if (pause_or_exit() == TRUE)
+			break;
+	}
+}
+
+void ProcessManager::execute_passthrough_mode(void)
+{
+	int port_a = 0;
+	int port_b = 0;
+	int watch_zmodem = TRUE;
+	char input[10] = {"\0"};
+
+	clrscr();
+	println("Serial Pass-through Mode");
+	println("");
+	println("Enter first COM port number:");
+	gets(input);
+	port_a = atoi(input);
+
+	memset(input, 0, sizeof(input));
+	println("Enter second COM port number:");
+	gets(input);
+	port_b = atoi(input);
+
+	serialmanager->passthrough(port_a, port_b, watch_zmodem);
+}
+
+void ProcessManager::show_port_diagnostics(void)
+{
+	serialmanager->show_diagnostics();
 }
 
 ProcessManager::ProcessManager()
@@ -134,6 +182,7 @@ ProcessManager::ProcessManager()
 	upmanager->setupconfig(config);
 	downmanager = new DownloadManager();
 	fwdmanager = ForwardManager::getinstance();
+	serialmanager = new SerialManager();
 }
 
 void ProcessManager::set_local_path(char *path)

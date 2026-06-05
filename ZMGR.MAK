@@ -27,6 +27,7 @@ EXE_dependencies =  \
  upldmgr.obj \
  transfer.obj \
  configcl.obj \
+ serial.obj \
  zmgr.obj \
  execpgm.obj \
  secrets.obj
@@ -42,6 +43,7 @@ procman.obj+
 upldmgr.obj+
 transfer.obj+
 configcl.obj+
+serial.obj+
 zmgr.obj+
 execpgm.obj+
 secrets.obj
@@ -66,9 +68,11 @@ upldmgr.obj: build.cfg upldmgr.cpp
 
 transfer.obj: build.cfg transfer.cpp 
 
-configcl.obj: build.cfg configcl.cpp 
+configcl.obj: build.cfg configcl.cpp
 
-zmgr.obj: build.cfg zmgr.cpp 
+serial.obj: build.cfg serial.cpp
+
+zmgr.obj: build.cfg zmgr.cpp
 
 execpgm.obj: build.cfg execpgm.cpp 
 

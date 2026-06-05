@@ -20,9 +20,32 @@ void printhelp()
 {
 	titlescreen();
 	println("#### - FORWARDING FILES GO INTO UPLOAD FOLDER! - ####");
-	println("#### - Use [ZMGR.EXE run] to run normally");
+	println("#### - Use [ZMGR.EXE run] to open the mode menu");
 	println("#### - Use [ZMGR.EXE -f] <NAMEOFCOMPUTER> to create forward file");
 	println("#### - Use [ZMGR.EXE -i] (interactive) asks for <NAMEOFCOMPUTER>");
+}
+
+int show_main_menu()
+{
+	char key;
+
+	while (1)
+	{
+		titlescreen();
+		println("Select operating mode:");
+		println("");
+		println("1. Manager Forwarding");
+		println("2. Auto Download");
+		println("3. Serial Pass-through");
+		println("4. Port Diagnostics");
+		println("X. Exit");
+		println("");
+
+		key = getch();
+		if (key == '1' || key == '2' || key == '3' || key == '4' ||
+			key == 'x' || key == 'X')
+			return key;
+	}
 }
 
 void createfilelistfile()
@@ -49,17 +72,30 @@ int runzmgr(char *path)
 {
 	ProcessManager *procman = new ProcessManager();
 	ConfigClass *config = ConfigClass::getinstance();
+	int choice = 0;
 
 	procman->set_local_path(path);
-	titlescreen();
-
-	delay(3000);
 
 	createdirectory(config->getconfigvalue(DOWNLOADFOLDER));
 	createdirectory(config->getconfigvalue(UPLOADFOLDER));
 	createdirectory(config->getconfigvalue(KEEPFOLDER));
 
-	procman->execute_main_loop();
+	while (1)
+	{
+		choice = show_main_menu();
+
+		if (choice == '1')
+			procman->execute_main_loop();
+		else if (choice == '2')
+			procman->execute_auto_download_loop();
+		else if (choice == '3')
+			procman->execute_passthrough_mode();
+		else if (choice == '4')
+			procman->show_port_diagnostics();
+		else if (choice == 'x' || choice == 'X')
+			break;
+	}
+
 	return 0;
 }
 
