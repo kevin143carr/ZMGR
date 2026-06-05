@@ -9,7 +9,7 @@ void titlescreen()
 	clrscr();
 	println("[Public Domain Zmodem] [Manager]");
 	println(" Public Domain Zmodem by Peter Mandrella, 1994-1998");
-	println(" ZMGR Version 2.0.13 ZModem - Manager");
+	println(" ZMGR Version v0.1.0 ZModem - Manager");
 	println(" Written in Borland C++ 3.1 by Kevin Carr, 2022");
 	println(" Updated July 2024: Added auto up/down automation");
 	println(" This is a MS-DOS program");

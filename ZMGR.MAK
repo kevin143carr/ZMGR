@@ -1,7 +1,7 @@
 .AUTODEPEND
 
 #		*Translator Definitions*
-CC = bcc +ZMGR.CFG
+CC = bcc +BUILD.CFG
 TASM = TASM
 TLIB = tlib
 TLINK = tlink
@@ -32,7 +32,7 @@ EXE_dependencies =  \
  secrets.obj
 
 #		*Explicit Rules*
-zmgr.exe: zmgr.cfg $(EXE_dependencies)
+zmgr.exe: build.cfg $(EXE_dependencies)
   $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
 c0l.obj+
 memmgr.obj+
@@ -54,28 +54,28 @@ cl.lib
 
 
 #		*Individual File Dependencies*
-memmgr.obj: zmgr.cfg memmgr.cpp 
+memmgr.obj: build.cfg memmgr.cpp 
 
-fwdmgr.obj: zmgr.cfg fwdmgr.cpp 
+fwdmgr.obj: build.cfg fwdmgr.cpp 
 
-dldmgr.obj: zmgr.cfg dldmgr.cpp 
+dldmgr.obj: build.cfg dldmgr.cpp 
 
-procman.obj: zmgr.cfg procman.cpp 
+procman.obj: build.cfg procman.cpp 
 
-upldmgr.obj: zmgr.cfg upldmgr.cpp 
+upldmgr.obj: build.cfg upldmgr.cpp 
 
-transfer.obj: zmgr.cfg transfer.cpp 
+transfer.obj: build.cfg transfer.cpp 
 
-configcl.obj: zmgr.cfg configcl.cpp 
+configcl.obj: build.cfg configcl.cpp 
 
-zmgr.obj: zmgr.cfg zmgr.cpp 
+zmgr.obj: build.cfg zmgr.cpp 
 
-execpgm.obj: zmgr.cfg execpgm.cpp 
+execpgm.obj: build.cfg execpgm.cpp 
 
-secrets.obj: zmgr.cfg secrets.cpp 
+secrets.obj: build.cfg secrets.cpp 
 
 #		*Compiler Configuration File*
-zmgr.cfg: zmgr.mak
+build.cfg: zmgr.mak
   copy &&|
 -ml
 -v
@@ -85,6 +85,6 @@ zmgr.cfg: zmgr.mak
 -wpre
 -I$(INCLUDEPATH)
 -L$(LIBPATH)
-| zmgr.cfg
+| build.cfg
 
 

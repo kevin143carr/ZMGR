@@ -3,9 +3,11 @@
 void ProcessManager::execute_main_loop(void)
 {
 	int returnval = 0;
+	int uploadhandled = FALSE;
 	while (1)
 	{
 		returnval = 0;
+		uploadhandled = FALSE;
 		clrscr();
 		printf("I AM \"%s\" :: ", config->getconfigvalue(COMPUTERNAME));
 		monitormemory();
@@ -16,33 +18,35 @@ void ProcessManager::execute_main_loop(void)
 		if (upmanager->checkforuploads() > 0)
 		{
 			println("Uploads Found");
+			uploadhandled = TRUE;
 			if (upmanager->beginuploads() == -1)
 			{
 				println("Error during uploads");
 			}
-			else
-				continue;
 		}
 
 		/***
 		 * Check for forward files in the download folder
 		 */
-		returnval = downmanager->checkforforwardfiles(config->getconfigvalue(DOWNLOADFOLDER));
-
-		if (returnval == TRUE)
+		if (uploadhandled == FALSE)
 		{
-			int rtnval = downmanager->processforwardfiles();
-			if (rtnval == ERROR)
-				println("Error in processing forward files from %s", config->getconfigvalue(DOWNLOADFOLDER));
-			else if (rtnval == TRUE)
-				println("forward files found and moved to %s folder", config->getconfigvalue(UPLOADFOLDER));
+			returnval = downmanager->checkforforwardfiles(config->getconfigvalue(DOWNLOADFOLDER));
+
+			if (returnval == TRUE)
+			{
+				int rtnval = downmanager->processforwardfiles();
+				if (rtnval == ERROR)
+					println("Error in processing forward files from %s", config->getconfigvalue(DOWNLOADFOLDER));
+				else if (rtnval == TRUE)
+					println("forward files found and moved to %s folder", config->getconfigvalue(UPLOADFOLDER));
+				else
+					println("Forward Files found for ME! Moved to the %s folder", config->getconfigvalue(KEEPFOLDER));
+			}
+			else if (returnval == ERROR)
+				println("Error in checking for forward files");
 			else
-				println("Forward Files found for ME! Moved to the %s folder", config->getconfigvalue(KEEPFOLDER));
+				downmanager->begindownload();
 		}
-		else if (returnval == ERROR)
-			println("Error in checking for forward files");
-		else
-			downmanager->begindownload();
 
 		if ((config->getconfigvalue(ONCEEXEC)[0] != '\0'))
 		{
@@ -125,6 +129,7 @@ ProcessManager::ProcessManager()
 {
 	config = ConfigClass::getinstance();
 	secretThings = new SecretThings();
+	epgm = new ExecPgm();
 	upmanager = new UploadManager();
 	upmanager->setupconfig(config);
 	downmanager = new DownloadManager();
