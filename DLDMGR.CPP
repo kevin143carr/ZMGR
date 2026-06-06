@@ -88,9 +88,9 @@ int DownloadManager::processforwardfiles()
     return returnval;
 }
 
-int DownloadManager::begindownload()
+int DownloadManager::begindownload(int port)
 {
-    println("Waiting for Downloads - Hit 'ESC' to skip!");
-    tranfer->download_operations();
+    println("Waiting for Downloads on COM%d - Hit 'ESC' to skip!", port);
+    tranfer->download_operations(port);
     return 0;
 }

@@ -60,8 +60,14 @@ int ForwardManager::checkforforwardfiles(char *sourcefolder)
 
     if (numfiles > 0)
     {
+        if (numfiles > MAX_LINES)
+        {
+            println("Too many forward files found in [%s]", sourcefolder);
+            return ERROR;
+        }
+
         forwardfilelist->count = numfiles;
-        numfiles = list_files_of_type(sourcefolder, "FIL", forwardfilelist->array, numfiles, MAX_FILE_SIZE);
+        numfiles = list_files_of_type(sourcefolder, "FIL", forwardfilelist->array, numfiles, MAX_FILENAME_LENGTH);
 
         if (numfiles > 0)
         {
@@ -96,8 +102,13 @@ int ForwardManager::validateforwardfiles(char *forwardfilename, char *sourcefile
     int linecount = 0;
 
     linecount = count_lines_in_file(forwardfilename);
+    if (linecount < 0 || linecount > MAX_LINES)
+    {
+        println("Forward file [%s] has too many lines", forwardfilename);
+        return ERROR;
+    }
 
-    read_lines_from_file(forwardfilename, forwardfilecontentsarray->array, linecount, MAX_FILENAME_LENGTH, FALSE);
+    read_lines_from_file(forwardfilename, forwardfilecontentsarray->array, linecount, MAX_FILENAME_LENGTH, usesourcefolder == TRUE ? FALSE : TRUE);
     forwardfilecontentsarray->count = linecount;
     for (int i = 0; i < forwardfilecontentsarray->count; i++)
     {
@@ -161,6 +172,32 @@ int ForwardManager::deleteforwardfiles(char *sourcefolder)
         remove(fullfilename);
     }
     return returnval;
+}
+
+int ForwardManager::deleteforwardfilesfromfolder(char *sourcefolder)
+{
+    char candidate[MAX_FILE_SIZE] = {"\0"};
+    char candidateupper[MAX_FILE_SIZE] = {"\0"};
+    char entryupper[MAX_FILE_SIZE] = {"\0"};
+
+    for (int i = 0; i < forwardfilecontentsarray->count; i++)
+    {
+        memset(candidate, 0, MAX_FILE_SIZE);
+        memset(candidateupper, 0, MAX_FILE_SIZE);
+        memset(entryupper, 0, MAX_FILE_SIZE);
+
+        sprintf(candidate, "%s\\%s", sourcefolder, getshortfilename(forwardfilecontentsarray->array[i]));
+        strcpy(candidateupper, candidate);
+        strcpy(entryupper, forwardfilecontentsarray->array[i]);
+        to_upper_case(candidateupper);
+        to_upper_case(entryupper);
+
+        if (strchr(forwardfilecontentsarray->array[i], '\\') == NULL ||
+            strcmp(candidateupper, entryupper) == 0)
+            remove(candidate);
+    }
+
+    return TRUE;
 }
 
 int ForwardManager::copyforwardfiles(char *sourcefolder, char *destinationfolder)

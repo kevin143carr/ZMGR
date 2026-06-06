@@ -17,6 +17,6 @@ public:
     DownloadManager();
     int checkforforwardfiles(char *sourcefolder);
     int processforwardfiles();
-    int begindownload();
+    int begindownload(int port);
 };
 #endif

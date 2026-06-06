@@ -8,6 +8,11 @@ class SerialManager
 private:
     unsigned int get_com_base(int port_number);
     int uart_present(unsigned int base);
+    int detect_uart_type(unsigned int base);
+    int get_standard_irq(int port_number);
+    int get_recommended_baud(int uart_type);
+    const char *get_uart_type_name(int uart_type);
+    const char *get_baud_note(int uart_type);
     int data_ready(unsigned int base);
     int transmit_ready(unsigned int base);
     void write_byte(unsigned int base, unsigned char value);
@@ -25,6 +30,7 @@ private:
 
 public:
     void show_diagnostics(void);
+    void run_who_is_there(void);
     int passthrough(int port_a, int port_b, int watch_zmodem);
 };
 

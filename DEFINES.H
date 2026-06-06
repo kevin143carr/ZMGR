@@ -1,14 +1,14 @@
 #ifndef DEFINES_H_INCLUDED
 #define DEFINES_H_INCLUDED
 
-#define MAX_FILENAME_LENGTH 66
-#define MAX_FILE_SIZE 100
+#define MAX_FILENAME_LENGTH 100
+#define MAX_FILE_SIZE 160
 #define MAX_ARGS 10
 
 #define MAX_LINES 50
 #define MAX_LEN 100
 
-#define MAX_CONFIG_SIZE 100
+#define MAX_CONFIG_SIZE 160
 
 #define TRUE 1
 #define FALSE 0

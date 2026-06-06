@@ -22,7 +22,7 @@ static void remove_config_file_value(char *path, char *key)
     }
 
     while (!feof(fptr) && !ferror(fptr))
-        if (fgets(line[i], 100, fptr) != NULL)
+        if (fgets(line[i], MAX_LEN, fptr) != NULL)
         {
             if (strstr(line[i], key) != NULL)
                 if (line[i][0] != '#')
@@ -57,7 +57,7 @@ static void get_config_file_value(char *path, const char *key, char *value)
         perror("fopen()");
     }
 
-    while (fgets(line, 100, fptr) != NULL)
+    while (fgets(line, MAX_CONFIG_SIZE, fptr) != NULL)
     {
         if (strstr(line, key) != NULL)
         {

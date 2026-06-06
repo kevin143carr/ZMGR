@@ -16,8 +16,8 @@ public:
     UploadManager();
     void setupconfig(ConfigClass *config);
     int checkforuploads();
-    char* processForwardFiles();
-    int beginuploads();
+    int processForwardFiles(char *fullfilename);
+    int beginuploads(int port);
 };
 
 #endif

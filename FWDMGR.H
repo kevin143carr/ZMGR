@@ -52,6 +52,7 @@ public:
     void cleanupforwardmanager();
     int ismyforwardfile();
     int deleteforwardfiles(char *sourcefolder);
+    int deleteforwardfilesfromfolder(char *sourcefolder);
     int copyforwardfiles(char *sourcefolder, char *destinationfolder);
     int moveforwardfiles(char *sourcefolder, char *destinationfolder);
     char *getforwardfilename();

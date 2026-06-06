@@ -12,20 +12,21 @@ Transfer::Transfer()
 	config = ConfigClass::getinstance();
 }
 
-int Transfer::download_operations()
+int Transfer::download_operations(int port)
 {
 	int returnval = 0;
 
 	char movefile[MAX_CONFIG_SIZE] = {'\0'};
 	char downloadparams[MAX_CONFIG_SIZE] = {'\0'};
 	char downloadfolder[MAX_CONFIG_SIZE] = {'\0'};
+	char zmoptions[MAX_CONFIG_SIZE] = {'\0'};
 
-	strcpy(downloadparams, config->getconfigvalue(DOWNLOADPARAMS));
+	strcpy(zmoptions, config->getconfigvalue(ZMOPTIONS));
 	strcpy(downloadfolder, config->getconfigvalue(DOWNLOADFOLDER));
 
-	replacesubstring(downloadparams, "{DOWNLOAD}", downloadfolder);
+	sprintf(downloadparams, "%s -c%d rz %s", zmoptions, port, downloadfolder);
 
-	if ((config->get_local_path()[0] != '\0') && (config->getconfigvalue(DOWNLOADPARAMS)[0] != '\0'))
+	if (downloadparams[0] != '\0')
 	{
 		// Execute the ZM program for download
 
@@ -38,8 +39,8 @@ int Transfer::download_operations()
 
 		// check to see if a ZMMGR.CFG was send and
 		// move it to the executable folder to be executed
-		sprintf(movefile, "%s\\ZMMGR.CFG", config->getconfigvalue(DOWNLOADPARAMS));
-		if (fileexists(movefile) != -1)
+		sprintf(movefile, "%s\\ZMMGR.CFG", downloadfolder);
+		if (config->get_local_path()[0] != '\0' && fileexists(movefile) != -1)
 		{
 			sprintf(movefile, "move %s %s /Y", movefile, config->get_local_path());
 			println("ZMMGR.CFG Found moving file: %s", movefile);
@@ -67,26 +68,24 @@ int Transfer::uploadfiles(char *uploadparams)
 	return returnval;
 }
 
-int Transfer::upload_operations(char *filename)
+int Transfer::upload_operations(char *filename, int port)
 {
 	char uploadparams[MAX_CONFIG_SIZE] = {"\0"};
 	char uploadfolder[MAX_CONFIG_SIZE] = {"\0"};
+	char zmoptions[MAX_CONFIG_SIZE] = {"\0"};
 	int returnval = TRUE;
 
-	strcpy(uploadparams, config->getconfigvalue(UPLOADPARAMS));
+	strcpy(zmoptions, config->getconfigvalue(ZMOPTIONS));
 
 	if (filename == NULL)
 	{ // No files listed in a .FIL text file
 		strcpy(uploadfolder, config->getconfigvalue(UPLOADFOLDER));
-		replacesubstring(uploadparams, "{UPLOAD}", uploadfolder);
+		sprintf(uploadparams, "%s -c%d sz %s\\*.*", zmoptions, port, uploadfolder);
 		returnval = uploadfiles(uploadparams);
 	}
 	else
 	{ // Files listed in a .FIL text file
-		memset(uploadparams, 0, MAX_CONFIG_SIZE);
-		strcpy(uploadparams, config->getconfigvalue(FORWARDPARAMS));
-		replacesubstring(uploadparams, "{FORWARD}", filename);
-
+		sprintf(uploadparams, "%s -c%d sz @%s", zmoptions, port, filename);
 		returnval = uploadfiles(uploadparams);
 	}
 

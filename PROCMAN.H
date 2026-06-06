@@ -7,7 +7,6 @@
 #include "EXECPGM.H"
 #include "PARSER.H"
 #include "SECRETS.H"
-#include "SERIAL.H"
 #include "UPLDMGR.H"
 #include "UTILS.H"
 
@@ -21,16 +20,18 @@ private:
     UploadManager* upmanager;
     DownloadManager* downmanager;
     ForwardManager *fwdmanager;
-    SerialManager *serialmanager;
             
     int setbreak;
     int keychr;
 
     int pause_or_exit(void);
+    int get_port_list(int *ports, int max_ports);
+    void execute_once_hooks(void);
+    void execute_external_tool(char *toolname);
 
 public:
-    void execute_main_loop(void);
-    void execute_auto_download_loop(void);
+    void execute_file_transfer_loop(void);
+    void create_forward_file_wizard(void);
     void execute_passthrough_mode(void);
     void show_port_diagnostics(void);
     ProcessManager();

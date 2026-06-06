@@ -13,7 +13,7 @@ public:
     int forwarding;
     Transfer();
     int uploadfiles(char* uploadparams);
-    int upload_operations(char* filename);
-    int download_operations();
+    int upload_operations(char* filename, int port);
+    int download_operations(int port);
 };
 #endif

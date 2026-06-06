@@ -10,14 +10,14 @@ const ConfigClass::CategoryString ConfigClass::categoryStrings[] = {
     { COMPUTERNAME, "COMPUTERNAME" },
     { FORWARDTO, "FORWARDTO" },
     { STARTUPSTATE, "STARTUPSTATE" },
+    { MENUCOUNTDOWN, "MENUCOUNTDOWN" },
     { PAUSETIME, "PAUSETIME" },
     { DOWNLOADFOLDER, "DOWNLOADFOLDER" },
     { UPLOADFOLDER, "UPLOADFOLDER" },
     { KEEPFOLDER, "KEEPFOLDER" },
     { EXECPATH, "EXECPATH" },
-    { DOWNLOADPARAMS, "DOWNLOADPARAMS" },
-    { UPLOADPARAMS, "UPLOADPARAMS" },
-    { FORWARDPARAMS, "FORWARDPARAMS" },
+    { PORTS, "PORTS" },
+    { ZMOPTIONS, "ZMOPTIONS" },
     { ONCEEXEC, "ONCEEXEC" },
     { ONCEDOSCOMMAND, "ONCEDOSCOMMAND" },
     { ZMGRSECRET, "ZMGRSECRET" }
@@ -53,8 +53,14 @@ char *ConfigClass::getconfigvalue(Category category)
 
 void ConfigClass::set_local_path(char *path)
 {
-	replacesubstring(path, "ZMGR.EXE", "");
+	char *lastslash;
+
 	strcpy(localpath, path);
+	lastslash = strrchr(localpath, '\\');
+	if (lastslash != NULL)
+		*(lastslash + 1) = '\0';
+	else
+		localpath[0] = '\0';
 }
 
 char *ConfigClass::get_local_path()

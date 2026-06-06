@@ -1,8 +1,8 @@
 # ZMGR
 
-Version: v0.1.0
+Version: v2.1.0
 
-ZModem Manager is a Borland C++ 3.1 MS-DOS wrapper for PDZM (Public Domain ZModem), created by Peter Mandrella, 1994-1998. PDZM handles ZModem transfers over null modem cable or dial-up modem; ZMGR adds continuous upload/download handling, forwarding files, and optional post-transfer commands.
+ZModem Manager is a Borland C++ 3.1 MS-DOS wrapper for PDZM (Public Domain ZModem), created by Peter Mandrella, 1994-1998. PDZM handles ZModem transfers over null modem cable or dial-up modem; ZMGR provides the launcher menu, while helper EXEs handle file transfer, forwarding, serial pass-through, and diagnostics.
 
 ## Runtime Config
 
@@ -15,7 +15,10 @@ Important keys:
 - `UPLOADFOLDER`: folder scanned before download mode for outgoing files.
 - `KEEPFOLDER`: destination for files forwarded to this machine.
 - `EXECPATH`: path to `ZM.EXE`.
-- `DOWNLOADPARAMS`, `UPLOADPARAMS`, `FORWARDPARAMS`: PDZM argument templates.
+- `PORTS`: comma-separated COM ports to use one at a time, such as `1` or `1,2`.
+- `ZMOPTIONS`: shared PDZM options. ZMGR adds `-cN`, `rz`, `sz`, and file paths automatically.
+- `STARTUPSTATE`: `MENU` or `FILETRANSFER`.
+- `MENUCOUNTDOWN`: seconds before the menu auto-starts file transfer. Press `ESC` on the menu to cancel the countdown.
 - `PAUSETIME`: seconds to wait between loop iterations while allowing `X`, `P`, and `C` keyboard commands.
 
 `BUILD.CFG` is the generated Borland compiler configuration. It is not the runtime configuration file.
@@ -24,10 +27,11 @@ Important keys:
 
 `ZMGR.EXE run` opens a startup menu:
 
-- `1`: Manager Forwarding, the original continuous upload/download/forwarding loop.
-- `2`: Auto Download, repeatedly launches PDZM receive mode and skips upload forwarding checks.
-- `3`: Serial Pass-through, bridges two selected COM ports byte-for-byte and watches for lightweight ZModem signatures.
-- `4`: Port Diagnostics, reports BIOS-listed COM ports, basic UART response, and mouse-driver presence.
+- `1`: File Transfer, launches `ZMFT.EXE` for the continuous upload-first, forwarding, and download loop.
+- `2`: Forward File, launches `ZMFT.EXE` in wizard mode to ask for the destination computer and a full file path, then creates a `.FIL` file.
+- `3`: Serial Pass-through, launches `ZMSER.EXE` and returns to ZMGR when it exits.
+- `4`: Port Diagnostics, launches `ZMDIAG.EXE` and returns to ZMGR when it exits.
+- `5`: Configuration, launches `ZMCFG.EXE` to edit common `ZMMGR.CFG` values.
 - `X`: exit.
 
 During the manager or auto-download loop pause:
@@ -65,13 +69,17 @@ Build the executable first:
 ./dosbox/build_zmgr.sh
 ```
 
-The local release package for v0.1.0 is assembled under `dist/v0.1.0/` and includes:
+The local release package for v2.1.0 is assembled under `dist/v2.1.0/` and includes:
 
 - `ZMGR.EXE`
+- `ZMFT.EXE`
+- `ZMSER.EXE`
+- `ZMDIAG.EXE`
+- `ZMCFG.EXE`
 - `ZMMGR.CFG`
 - `README.md`
 - `LICENSE`
 - `VERSION`
 - `RELEASE_NOTES.md`
 
-Upload the ZIP from `dist/v0.1.0/` to the matching GitHub release.
+Upload the ZIP from `dist/v2.1.0/` to the matching GitHub release.

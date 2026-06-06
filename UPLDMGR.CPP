@@ -13,29 +13,25 @@ int UploadManager::checkforuploads()
  * Anyway, it checks to see if all the files in the .FIL are located in the upload
  * folder.  If not it returns a NULL.
  */
-char *UploadManager::processForwardFiles()
+int UploadManager::processForwardFiles(char *fullfilename)
 {
     char *myfwdfilename = NULL;
-    char fullfilename[MAX_FILE_SIZE] = {"\0"};
 
     myfwdfilename = forwardmanager->getforwardfilename();
     sprintf(fullfilename, "%s\\%s", config->getconfigvalue(UPLOADFOLDER), myfwdfilename);
     to_upper_case(fullfilename);
 
-    if (forwardmanager->validateforwardfiles(fullfilename, config->getconfigvalue(UPLOADFOLDER), TRUE) == ERROR)
+    if (forwardmanager->validateforwardfiles(fullfilename, config->getconfigvalue(UPLOADFOLDER), FALSE) == ERROR)
     {
-        println("Problem happened in processing forward files, deleting files!");
-        forwardmanager->deleteforwardfiles(config->getconfigvalue(UPLOADFOLDER));
+        println("Problem happened in processing forward file!");
         remove(fullfilename);
+        return ERROR;
     }
 
-    listdirectory2file(config->getconfigvalue(UPLOADFOLDER), fullfilename, TRUE, ".FIL");
-    appendstring2file(fullfilename, fullfilename);
-
-    return fullfilename;
+    return SUCCESS;
 }
 
-int UploadManager::beginuploads()
+int UploadManager::beginuploads(int port)
 {
     int returnval = TRUE;
     char uploadfolder[MAX_FILE_SIZE] = {"\0"};
@@ -44,22 +40,16 @@ int UploadManager::beginuploads()
 
     if (forwardmanager->checkforforwardfiles(uploadfolder) == TRUE)
     {
-        strcpy(forwardfilename, processForwardFiles());
-
-        if (forwardfilename != NULL)
+        if (processForwardFiles(forwardfilename) == SUCCESS)
         {
-            returnval = tranfer->upload_operations(forwardfilename);
+            returnval = tranfer->upload_operations(forwardfilename, port);
 
             if (returnval == SUCCESS)
             {
-                int morefiles = FALSE;
-
-                println("Removing files from the %s folder", config->getconfigvalue(UPLOADFOLDER));
+                println("Removing .FIL file from the %s folder", config->getconfigvalue(UPLOADFOLDER));
                 println("Based on .FIL %s file", forwardfilename);
+                forwardmanager->deleteforwardfilesfromfolder(config->getconfigvalue(UPLOADFOLDER));
                 remove(forwardfilename);
-                morefiles = filesexists_in_dir(config->getconfigvalue(UPLOADFOLDER), "*.FIL");
-                if(morefiles == FALSE)
-                    forwardmanager->deleteforwardfiles(config->getconfigvalue(UPLOADFOLDER));
             }
             forwardmanager->clear_arrays();
         }
@@ -75,7 +65,7 @@ int UploadManager::beginuploads()
         int uploadfilecount = count_files_of_type(uploadfolder, "*");
         char **filearray = memmgr->allocate_string_array(uploadfilecount, MAX_FILE_SIZE);
         uploadfilecount = list_files_of_type(uploadfolder, "*", filearray, uploadfilecount, MAX_FILE_SIZE);
-        returnval = tranfer->upload_operations(NULL);
+        returnval = tranfer->upload_operations(NULL, port);
 
         if (returnval == SUCCESS)
         {

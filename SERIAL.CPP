@@ -1,6 +1,7 @@
 #include <CONIO.H>
 #include <DOS.H>
 #include <STDIO.H>
+#include <STDLIB.H>
 #include <STRING.H>
 #include "SERIAL.H"
 #include "UTILS.H"
@@ -8,13 +9,256 @@
 #define UART_RBR 0
 #define UART_THR 0
 #define UART_IER 1
+#define UART_IIR 2
+#define UART_FCR 2
 #define UART_LSR 5
 #define UART_SCR 7
 
 #define LSR_DATA_READY 0x01
 #define LSR_THR_EMPTY 0x20
 
+#define UART_TYPE_NONE 0
+#define UART_TYPE_8250 1
+#define UART_TYPE_16450 2
+#define UART_TYPE_16550 3
+#define UART_TYPE_16550A 4
+
 #define MSD_REPORT_FILE "REPORT.TXT"
+#define ROUTE_FILE "ZMROUTES.TXT"
+#define DISCOVERY_SECONDS 30
+#define DISCOVERY_PACKET_SIZE 512
+#define MAX_DISCOVERY_MACHINES 16
+
+static int read_config_value_local(const char *key, char *value, int max_len)
+{
+    FILE *file;
+    char line[180];
+    int key_len = strlen(key);
+
+    value[0] = '\0';
+    file = fopen("ZMMGR.CFG", "r");
+    if (file == NULL)
+        return FALSE;
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        if (line[0] == '#')
+            continue;
+        if (strncmp(line, key, key_len) == 0)
+        {
+            char *equal = strchr(line, '=');
+            char *start;
+            char *newline;
+            if (equal == NULL)
+                continue;
+            start = equal + 1;
+            while (*start == ' ')
+                start++;
+            strncpy(value, start, max_len - 1);
+            value[max_len - 1] = '\0';
+            newline = strchr(value, '\n');
+            if (newline != NULL)
+                *newline = '\0';
+            newline = strchr(value, '\r');
+            if (newline != NULL)
+                *newline = '\0';
+            fclose(file);
+            return TRUE;
+        }
+    }
+
+    fclose(file);
+    return FALSE;
+}
+
+static int get_config_ports_local(int *ports, int max_ports)
+{
+    char portconfig[MAX_CONFIG_SIZE] = {"\0"};
+    char *token;
+    int count = 0;
+
+    if (read_config_value_local("PORTS", portconfig, sizeof(portconfig)) == FALSE)
+    {
+        ports[0] = 1;
+        return 1;
+    }
+
+    token = strtok(portconfig, ",");
+    while (token != NULL && count < max_ports)
+    {
+        ports[count] = atoi(token);
+        if (ports[count] >= 1 && ports[count] <= 4)
+            count++;
+        token = strtok(NULL, ",");
+    }
+
+    if (count == 0)
+    {
+        ports[0] = 1;
+        count = 1;
+    }
+
+    return count;
+}
+
+static void trim_token(char *value)
+{
+    char *start;
+    char *end;
+
+    start = value;
+    while (*start == ' ')
+        start++;
+    if (start != value)
+        memmove(value, start, strlen(start) + 1);
+
+    end = value + strlen(value);
+    while (end > value && (*(end - 1) == ' ' || *(end - 1) == '\n' || *(end - 1) == '\r'))
+    {
+        *(end - 1) = '\0';
+        end--;
+    }
+}
+
+static int find_machine(char names[][MAX_FILENAME_LENGTH], int count, const char *name)
+{
+    int i;
+
+    for (i = 0; i < count; i++)
+    {
+        if (strcmp(names[i], name) == 0)
+            return i;
+    }
+
+    return -1;
+}
+
+static int add_or_update_route(char names[][MAX_FILENAME_LENGTH], int *ports, int *count, const char *name, int port)
+{
+    int index;
+    char cleanname[MAX_FILENAME_LENGTH] = {"\0"};
+
+    strncpy(cleanname, name, MAX_FILENAME_LENGTH - 1);
+    cleanname[MAX_FILENAME_LENGTH - 1] = '\0';
+    trim_token(cleanname);
+    to_upper_case(cleanname);
+
+    if (cleanname[0] == '\0')
+        return FALSE;
+
+    index = find_machine(names, *count, cleanname);
+    if (index >= 0)
+    {
+        if (ports[index] == 0)
+            return FALSE;
+        if (ports[index] != port)
+        {
+            ports[index] = port;
+            return TRUE;
+        }
+        return FALSE;
+    }
+
+    if (*count >= MAX_DISCOVERY_MACHINES)
+        return FALSE;
+
+    strcpy(names[*count], cleanname);
+    ports[*count] = port;
+    (*count)++;
+    return TRUE;
+}
+
+static void sort_routes(char names[][MAX_FILENAME_LENGTH], int *ports, int count)
+{
+    int i;
+    int j;
+
+    for (i = 0; i < count - 1; i++)
+    {
+        for (j = i + 1; j < count; j++)
+        {
+            if (strcmp(names[i], names[j]) > 0)
+            {
+                char tempname[MAX_FILENAME_LENGTH];
+                int tempport;
+
+                strcpy(tempname, names[i]);
+                strcpy(names[i], names[j]);
+                strcpy(names[j], tempname);
+
+                tempport = ports[i];
+                ports[i] = ports[j];
+                ports[j] = tempport;
+            }
+        }
+    }
+}
+
+static void build_machine_list(char names[][MAX_FILENAME_LENGTH], int *ports, int count, char *output, int output_len)
+{
+    int i;
+
+    sort_routes(names, ports, count);
+    output[0] = '\0';
+
+    for (i = 0; i < count; i++)
+    {
+        if (i > 0)
+            strncat(output, ",", output_len - strlen(output) - 1);
+        strncat(output, names[i], output_len - strlen(output) - 1);
+    }
+}
+
+static int machine_list_matches(char *received_list, char names[][MAX_FILENAME_LENGTH], int *ports, int count)
+{
+    char local_list[DISCOVERY_PACKET_SIZE] = {"\0"};
+    char received_names[MAX_DISCOVERY_MACHINES][MAX_FILENAME_LENGTH];
+    int received_ports[MAX_DISCOVERY_MACHINES];
+    int received_count = 0;
+    char listcopy[DISCOVERY_PACKET_SIZE];
+    char *token;
+    int i;
+
+    memset(received_names, 0, sizeof(received_names));
+    for (i = 0; i < MAX_DISCOVERY_MACHINES; i++)
+        received_ports[i] = 0;
+
+    strncpy(listcopy, received_list, sizeof(listcopy) - 1);
+    listcopy[sizeof(listcopy) - 1] = '\0';
+    token = strtok(listcopy, ",");
+    while (token != NULL)
+    {
+        add_or_update_route(received_names, received_ports, &received_count, token, 1);
+        token = strtok(NULL, ",");
+    }
+
+    build_machine_list(names, ports, count, local_list, sizeof(local_list));
+    build_machine_list(received_names, received_ports, received_count, received_list, DISCOVERY_PACKET_SIZE);
+
+    return (strcmp(local_list, received_list) == 0);
+}
+
+static int write_route_file(char names[][MAX_FILENAME_LENGTH], int *ports, int count)
+{
+    FILE *file;
+    int i;
+
+    file = fopen(ROUTE_FILE, "w");
+    if (file == NULL)
+        return FALSE;
+
+    fprintf(file, "# MACHINE=COMPORT\n");
+    for (i = 0; i < count; i++)
+    {
+        if (ports[i] == 0)
+            fprintf(file, "%s=LOCAL\n", names[i]);
+        else
+            fprintf(file, "%s=%d\n", names[i], ports[i]);
+    }
+
+    fclose(file);
+    return TRUE;
+}
 
 unsigned int SerialManager::get_com_base(int port_number)
 {
@@ -43,6 +287,91 @@ int SerialManager::uart_present(unsigned int base)
         return TRUE;
 
     return FALSE;
+}
+
+int SerialManager::detect_uart_type(unsigned int base)
+{
+    unsigned char original_scratch;
+    unsigned char interrupt_id;
+
+    if (base == 0)
+        return UART_TYPE_NONE;
+
+    original_scratch = inportb(base + UART_SCR);
+    outportb(base + UART_SCR, 0x55);
+    if (inportb(base + UART_SCR) != 0x55)
+        return UART_TYPE_8250;
+
+    outportb(base + UART_SCR, 0xAA);
+    if (inportb(base + UART_SCR) != 0xAA)
+    {
+        outportb(base + UART_SCR, original_scratch);
+        return UART_TYPE_8250;
+    }
+    outportb(base + UART_SCR, original_scratch);
+
+    outportb(base + UART_FCR, 0x01);
+    interrupt_id = inportb(base + UART_IIR);
+    outportb(base + UART_FCR, 0x00);
+
+    if ((interrupt_id & 0xC0) == 0xC0)
+        return UART_TYPE_16550A;
+    if ((interrupt_id & 0x80) == 0x80)
+        return UART_TYPE_16550;
+
+    return UART_TYPE_16450;
+}
+
+int SerialManager::get_standard_irq(int port_number)
+{
+    if (port_number == 1 || port_number == 3)
+        return 4;
+    if (port_number == 2 || port_number == 4)
+        return 3;
+
+    return 0;
+}
+
+int SerialManager::get_recommended_baud(int uart_type)
+{
+    if (uart_type == UART_TYPE_16550A)
+        return 115200;
+    if (uart_type == UART_TYPE_16550)
+        return 57600;
+    if (uart_type == UART_TYPE_16450)
+        return 19200;
+    if (uart_type == UART_TYPE_8250)
+        return 9600;
+
+    return 0;
+}
+
+const char *SerialManager::get_uart_type_name(int uart_type)
+{
+    if (uart_type == UART_TYPE_8250)
+        return "8250";
+    if (uart_type == UART_TYPE_16450)
+        return "16450";
+    if (uart_type == UART_TYPE_16550)
+        return "16550 FIFO bad";
+    if (uart_type == UART_TYPE_16550A)
+        return "16550A FIFO";
+
+    return "None";
+}
+
+const char *SerialManager::get_baud_note(int uart_type)
+{
+    if (uart_type == UART_TYPE_16550A)
+        return "max 115200, test cable/device";
+    if (uart_type == UART_TYPE_16550)
+        return "FIFO unreliable, test above 57600";
+    if (uart_type == UART_TYPE_16450)
+        return "no FIFO, 19200 safer";
+    if (uart_type == UART_TYPE_8250)
+        return "old UART, 9600 safer";
+
+    return "not detected";
 }
 
 int SerialManager::data_ready(unsigned int base)
@@ -354,23 +683,29 @@ void SerialManager::show_diagnostics(void)
     for (i = 1; i <= 4; i++)
     {
         unsigned int base = get_com_base(i);
+        int standard_irq = get_standard_irq(i);
+        int uart_type = detect_uart_type(base);
+        int recommended_baud = get_recommended_baud(uart_type);
 
         if (base == 0)
         {
-            println("COM%d: Not listed by BIOS", i);
+            println("COM%d IRQ%d base ---- UART %-12s max baud ----",
+                    i,
+                    standard_irq,
+                    "not listed");
         }
         else
         {
-            println("COM%d: BIOS base 0x%04X, UART %s",
+            println("COM%d IRQ%d base %04Xh UART %-12s max baud 115200",
                     i,
+                    standard_irq,
                     base,
-                    uart_present(base) == TRUE ? "responds" : "not confirmed");
+                    get_uart_type_name(uart_type));
+            println("     recommended %-6d %s",
+                    recommended_baud,
+                    get_baud_note(uart_type));
         }
     }
-
-    println("");
-    print_irq_vectors();
-    println("");
 
     if (mouse_driver_present() == TRUE)
     {
@@ -414,6 +749,210 @@ void SerialManager::show_diagnostics(void)
     {
         println("Mouse driver: not detected");
     }
+
+    println("");
+    println("Press any key to continue");
+    getch();
+}
+
+void SerialManager::run_who_is_there(void)
+{
+    char computername[MAX_FILENAME_LENGTH] = {"\0"};
+    char route_names[MAX_DISCOVERY_MACHINES][MAX_FILENAME_LENGTH];
+    int route_ports[MAX_DISCOVERY_MACHINES];
+    int route_count = 0;
+    int ports[MAX_ARGS];
+    int port_count;
+    char receive_buffers[MAX_ARGS][DISCOVERY_PACKET_SIZE];
+    int receive_lengths[MAX_ARGS];
+    int seconds;
+    int p;
+    int converged = FALSE;
+
+    memset(route_names, 0, sizeof(route_names));
+    memset(receive_buffers, 0, sizeof(receive_buffers));
+    for (p = 0; p < MAX_DISCOVERY_MACHINES; p++)
+        route_ports[p] = 0;
+    for (p = 0; p < MAX_ARGS; p++)
+        receive_lengths[p] = 0;
+
+    if (read_config_value_local("COMPUTERNAME", computername, sizeof(computername)) == FALSE ||
+        computername[0] == '\0')
+        strcpy(computername, "UNKNOWN");
+    to_upper_case(computername);
+    add_or_update_route(route_names, route_ports, &route_count, computername, 0);
+
+    port_count = get_config_ports_local(ports, MAX_ARGS);
+
+    clrscr();
+    println("ZMGR Who Is There");
+    println("");
+    println("Local machine: %s", computername);
+    println("Using configured ports:");
+    for (p = 0; p < port_count; p++)
+        println("  COM%d", ports[p]);
+    println("");
+    println("Sending discovery packets. Press X to stop.");
+    println("");
+
+    for (seconds = 0; seconds < DISCOVERY_SECONDS && converged == FALSE; seconds++)
+    {
+        char machine_list[DISCOVERY_PACKET_SIZE] = {"\0"};
+        char packet[DISCOVERY_PACKET_SIZE] = {"\0"};
+
+        build_machine_list(route_names, route_ports, route_count, machine_list, sizeof(machine_list));
+        sprintf(packet, "WHO_THERE\r\nFROM=%s\r\nMACHINE_LIST=%s\r\nEND\r\n", computername, machine_list);
+
+        for (p = 0; p < port_count; p++)
+        {
+            unsigned int base = get_com_base(ports[p]);
+            char *outptr = packet;
+
+            if (base == 0 || uart_present(base) == FALSE)
+                continue;
+
+            while (*outptr != '\0')
+            {
+                int waitcount = 0;
+                while (transmit_ready(base) == FALSE && waitcount < 1000)
+                {
+                    delay(1);
+                    waitcount++;
+                }
+                if (transmit_ready(base) == TRUE)
+                    write_byte(base, (unsigned char)*outptr);
+                outptr++;
+            }
+        }
+
+        for (p = 0; p < 10; p++)
+        {
+            int port_index;
+            if (kbhit())
+            {
+                char key = getch();
+                if (key == 'x' || key == 'X')
+                    seconds = DISCOVERY_SECONDS;
+            }
+
+            for (port_index = 0; port_index < port_count; port_index++)
+            {
+                unsigned int base = get_com_base(ports[port_index]);
+
+                if (base == 0)
+                    continue;
+
+                while (data_ready(base) == TRUE)
+                {
+                    unsigned char value = read_byte(base);
+                    int length = receive_lengths[port_index];
+
+                    if (length < DISCOVERY_PACKET_SIZE - 1)
+                    {
+                        receive_buffers[port_index][length] = (char)value;
+                        length++;
+                        receive_buffers[port_index][length] = '\0';
+                        receive_lengths[port_index] = length;
+                    }
+                    else
+                    {
+                        receive_lengths[port_index] = 0;
+                        receive_buffers[port_index][0] = '\0';
+                    }
+
+                    if (strstr(receive_buffers[port_index], "END") != NULL)
+                    {
+                        char packetcopy[DISCOVERY_PACKET_SIZE];
+                        char *line;
+                        char from_machine[MAX_FILENAME_LENGTH] = {"\0"};
+                        char received_list[DISCOVERY_PACKET_SIZE] = {"\0"};
+                        int changed = FALSE;
+
+                        strncpy(packetcopy, receive_buffers[port_index], sizeof(packetcopy) - 1);
+                        packetcopy[sizeof(packetcopy) - 1] = '\0';
+
+                        line = strtok(packetcopy, "\r\n");
+                        while (line != NULL)
+                        {
+                            if (strncmp(line, "FROM=", 5) == 0)
+                            {
+                                strncpy(from_machine, line + 5, sizeof(from_machine) - 1);
+                                from_machine[sizeof(from_machine) - 1] = '\0';
+                                trim_token(from_machine);
+                            }
+                            else if (strncmp(line, "MACHINE_LIST=", 13) == 0)
+                            {
+                                strncpy(received_list, line + 13, sizeof(received_list) - 1);
+                                received_list[sizeof(received_list) - 1] = '\0';
+                                trim_token(received_list);
+                            }
+                            line = strtok(NULL, "\r\n");
+                        }
+
+                        if (from_machine[0] != '\0' && strcmp(from_machine, computername) != 0)
+                        {
+                            changed = add_or_update_route(route_names, route_ports, &route_count, from_machine, ports[port_index]);
+                            println("Heard %-12s on COM%d", from_machine, ports[port_index]);
+                        }
+
+                        if (received_list[0] != '\0')
+                        {
+                            char listcopy[DISCOVERY_PACKET_SIZE];
+                            char comparecopy[DISCOVERY_PACKET_SIZE];
+                            char *token;
+                            strncpy(listcopy, received_list, sizeof(listcopy) - 1);
+                            listcopy[sizeof(listcopy) - 1] = '\0';
+                            token = strtok(listcopy, ",");
+                            while (token != NULL)
+                            {
+                                char machinename[MAX_FILENAME_LENGTH];
+                                strncpy(machinename, token, sizeof(machinename) - 1);
+                                machinename[sizeof(machinename) - 1] = '\0';
+                                trim_token(machinename);
+                                to_upper_case(machinename);
+                                if (strcmp(machinename, computername) != 0)
+                                {
+                                    if (add_or_update_route(route_names, route_ports, &route_count, machinename, ports[port_index]) == TRUE)
+                                        changed = TRUE;
+                                }
+                                token = strtok(NULL, ",");
+                            }
+
+                            strncpy(comparecopy, received_list, sizeof(comparecopy) - 1);
+                            comparecopy[sizeof(comparecopy) - 1] = '\0';
+                            if (machine_list_matches(comparecopy, route_names, route_ports, route_count) == TRUE && changed == FALSE)
+                                converged = TRUE;
+                        }
+
+                        receive_lengths[port_index] = 0;
+                        receive_buffers[port_index][0] = '\0';
+                    }
+                }
+            }
+            delay(100);
+        }
+    }
+
+    sort_routes(route_names, route_ports, route_count);
+    println("");
+    println("Known machines:");
+    for (p = 0; p < route_count; p++)
+    {
+        if (route_ports[p] == 0)
+            println("  %-12s LOCAL", route_names[p]);
+        else
+            println("  %-12s COM%d", route_names[p], route_ports[p]);
+    }
+
+    if (write_route_file(route_names, route_ports, route_count) == TRUE)
+        println("Saved %s", ROUTE_FILE);
+    else
+        println("Could not save %s", ROUTE_FILE);
+
+    if (converged == TRUE)
+        println("Discovery converged");
+    else
+        println("Discovery ended");
 
     println("");
     println("Press any key to continue");

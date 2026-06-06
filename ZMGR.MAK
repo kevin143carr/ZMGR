@@ -19,7 +19,10 @@ INCLUDEPATH = C:\BC\INCLUDE
 #		*List Macros*
 
 
-EXE_dependencies =  \
+ZMGR_dependencies =  \
+ zmgr.obj
+
+ZMFT_dependencies =  \
  memmgr.obj \
  fwdmgr.obj \
  dldmgr.obj \
@@ -27,13 +30,36 @@ EXE_dependencies =  \
  upldmgr.obj \
  transfer.obj \
  configcl.obj \
- serial.obj \
- zmgr.obj \
+ zmft.obj \
  execpgm.obj \
  secrets.obj
 
+ZMSER_dependencies =  \
+ serial.obj \
+ zmser.obj
+
+ZMDIAG_dependencies =  \
+ serial.obj \
+ zmdiag.obj
+
+ZMCFG_dependencies =  \
+ zmcfg.obj
+
 #		*Explicit Rules*
-zmgr.exe: build.cfg $(EXE_dependencies)
+all: zmgr.exe zmft.exe zmser.exe zmdiag.exe zmcfg.exe
+
+zmgr.exe: build.cfg $(ZMGR_dependencies)
+  $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
+c0l.obj+
+zmgr.obj
+zmgr
+		# no map file
+emu.lib+
+mathl.lib+
+cl.lib
+|
+
+zmft.exe: build.cfg $(ZMFT_dependencies)
   $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
 c0l.obj+
 memmgr.obj+
@@ -43,11 +69,45 @@ procman.obj+
 upldmgr.obj+
 transfer.obj+
 configcl.obj+
-serial.obj+
-zmgr.obj+
+zmft.obj+
 execpgm.obj+
 secrets.obj
-zmgr
+zmft
+		# no map file
+emu.lib+
+mathl.lib+
+cl.lib
+|
+
+zmser.exe: build.cfg $(ZMSER_dependencies)
+  $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
+c0l.obj+
+serial.obj+
+zmser.obj
+zmser
+		# no map file
+emu.lib+
+mathl.lib+
+cl.lib
+|
+
+zmdiag.exe: build.cfg $(ZMDIAG_dependencies)
+  $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
+c0l.obj+
+serial.obj+
+zmdiag.obj
+zmdiag
+		# no map file
+emu.lib+
+mathl.lib+
+cl.lib
+|
+
+zmcfg.exe: build.cfg $(ZMCFG_dependencies)
+  $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
+c0l.obj+
+zmcfg.obj
+zmcfg
 		# no map file
 emu.lib+
 mathl.lib+
@@ -56,7 +116,7 @@ cl.lib
 
 
 #		*Individual File Dependencies*
-memmgr.obj: build.cfg memmgr.cpp 
+memmgr.obj: build.cfg memmgr.cpp
 
 fwdmgr.obj: build.cfg fwdmgr.cpp 
 
@@ -74,7 +134,15 @@ serial.obj: build.cfg serial.cpp
 
 zmgr.obj: build.cfg zmgr.cpp
 
-execpgm.obj: build.cfg execpgm.cpp 
+zmft.obj: build.cfg zmft.cpp
+
+zmser.obj: build.cfg zmser.cpp
+
+zmdiag.obj: build.cfg zmdiag.cpp
+
+zmcfg.obj: build.cfg zmcfg.cpp
+
+execpgm.obj: build.cfg execpgm.cpp
 
 secrets.obj: build.cfg secrets.cpp 
 
