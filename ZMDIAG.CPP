@@ -1,5 +1,6 @@
 #include <CONIO.H>
 #include <STDIO.H>
+#include "APPINFO.H"
 #include "SERIAL.H"
 
 int main(void)
@@ -9,9 +10,10 @@ int main(void)
 
 	while (1)
 	{
-		clrscr();
-		cprintf("ZMGR Diagnostics\r\n");
-		cprintf("\r\n");
+			clrscr();
+			cprintf("ZMGR Diagnostics\r\n");
+			cprintf("%s\r\n", ZMGR_BUILD_LABEL);
+			cprintf("\r\n");
 		cprintf("1. COM Port Information\r\n");
 		cprintf("2. Who Is There\r\n");
 		cprintf("X. Exit\r\n");

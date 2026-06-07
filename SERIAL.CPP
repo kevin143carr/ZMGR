@@ -3,19 +3,28 @@
 #include <STDIO.H>
 #include <STDLIB.H>
 #include <STRING.H>
+#include "APPINFO.H"
 #include "SERIAL.H"
 #include "UTILS.H"
 
 #define UART_RBR 0
 #define UART_THR 0
+#define UART_DLL 0
 #define UART_IER 1
+#define UART_DLM 1
 #define UART_IIR 2
 #define UART_FCR 2
+#define UART_LCR 3
+#define UART_MCR 4
 #define UART_LSR 5
 #define UART_SCR 7
 
 #define LSR_DATA_READY 0x01
 #define LSR_THR_EMPTY 0x20
+
+#define LCR_DLAB 0x80
+#define LCR_8N1 0x03
+#define MCR_DTR_RTS_OUT2 0x0B
 
 #define UART_TYPE_NONE 0
 #define UART_TYPE_8250 1
@@ -25,9 +34,15 @@
 
 #define MSD_REPORT_FILE "REPORT.TXT"
 #define ROUTE_FILE "ZMROUTES.TXT"
-#define DISCOVERY_SECONDS 30
+#define DEFAULT_DISCOVERY_BAUD 1200
+#define MAX_DISCOVERY_BAUD 1200
+#define DISCOVERY_CYCLES 6
+#define DISCOVERY_SLOT_COUNT 10
+#define DISCOVERY_SLOT_TICKS 1000
 #define DISCOVERY_PACKET_SIZE 512
 #define MAX_DISCOVERY_MACHINES 16
+#define DISCOVERY_BEGIN_MARKER "<<<"
+#define DISCOVERY_END_MARKER ">>>\r\n"
 
 static int read_config_value_local(const char *key, char *value, int max_len)
 {
@@ -99,6 +114,44 @@ static int get_config_ports_local(int *ports, int max_ports)
     }
 
     return count;
+}
+
+static int get_discovery_baud_local(void)
+{
+    char options[MAX_CONFIG_SIZE] = {"\0"};
+    char *baud;
+    int value;
+
+    if (read_config_value_local("ZMOPTIONS", options, sizeof(options)) == FALSE)
+        return DEFAULT_DISCOVERY_BAUD;
+
+    baud = strstr(options, "-b");
+    if (baud == NULL)
+        baud = strstr(options, "-B");
+    if (baud == NULL)
+        return DEFAULT_DISCOVERY_BAUD;
+
+    value = atoi(baud + 2);
+    if (value <= 0)
+        return DEFAULT_DISCOVERY_BAUD;
+    if (value > MAX_DISCOVERY_BAUD)
+        return MAX_DISCOVERY_BAUD;
+
+    return value;
+}
+
+static int get_discovery_slot(const char *computername)
+{
+    int i;
+    int hash = 0;
+
+    for (i = 0; computername[i] != '\0'; i++)
+        hash += ((i + 1) * computername[i]);
+
+    if (hash < 0)
+        hash = -hash;
+
+    return hash % 10;
 }
 
 static void trim_token(char *value)
@@ -207,6 +260,257 @@ static void build_machine_list(char names[][MAX_FILENAME_LENGTH], int *ports, in
             strncat(output, ",", output_len - strlen(output) - 1);
         strncat(output, names[i], output_len - strlen(output) - 1);
     }
+}
+
+static void discard_stream_bytes(char *buffer, int *length, int count)
+{
+    if (count <= 0)
+        return;
+    if (count >= *length)
+    {
+        memset(buffer, 0, DISCOVERY_PACKET_SIZE);
+        *length = 0;
+        return;
+    }
+
+    memmove(buffer, buffer + count, *length - count);
+    *length -= count;
+    buffer[*length] = '\0';
+    memset(buffer + *length + 1, 0, DISCOVERY_PACKET_SIZE - *length - 1);
+}
+
+static void build_iam_frame(const char *computername, char *packet)
+{
+    sprintf(packet, "<<<IAM::%s>>>\r\n", computername);
+}
+
+static void build_know_frame(const char *computername, const char *knownname, char *packet)
+{
+    sprintf(packet, "<<<KNOW::%s::%s>>>\r\n", computername, knownname);
+}
+
+static int read_discovery_frame(char *buffer, int *length, char *frame, int frame_len)
+{
+    int i;
+    int j;
+    int start = -1;
+    int begin_len = strlen(DISCOVERY_BEGIN_MARKER);
+    int end_len = strlen(DISCOVERY_END_MARKER);
+    int end = -1;
+    int restart = -1;
+    int body_len;
+
+    while (*length > 0)
+    {
+        start = -1;
+        for (i = 0; i <= *length - begin_len; i++)
+        {
+            if (strncmp(buffer + i, DISCOVERY_BEGIN_MARKER, begin_len) == 0)
+            {
+                start = i;
+                break;
+            }
+        }
+
+        if (start < 0)
+        {
+            if (*length > begin_len - 1)
+                discard_stream_bytes(buffer, length, *length - (begin_len - 1));
+            return FALSE;
+        }
+
+        if (start > 0)
+            discard_stream_bytes(buffer, length, start);
+
+        restart = -1;
+        for (j = begin_len; j <= *length - begin_len; j++)
+        {
+            if (strncmp(buffer + j, DISCOVERY_BEGIN_MARKER, begin_len) == 0)
+            {
+                restart = j;
+                break;
+            }
+        }
+
+        end = -1;
+        for (j = begin_len; j <= *length - end_len; j++)
+        {
+            if (strncmp(buffer + j, DISCOVERY_END_MARKER, end_len) == 0)
+            {
+                end = j;
+                break;
+            }
+        }
+
+        if (restart >= 0 && (end < 0 || restart < end))
+        {
+            println("DROP partial frame, resync");
+            discard_stream_bytes(buffer, length, restart);
+            continue;
+        }
+
+        if (end < 0)
+            return FALSE;
+
+        body_len = end - begin_len;
+        if (body_len <= 0 || body_len >= frame_len)
+        {
+            println("DROP bad frame length %d", body_len);
+            discard_stream_bytes(buffer, length, end + end_len);
+            continue;
+        }
+
+        strncpy(frame, buffer + begin_len, body_len);
+        frame[body_len] = '\0';
+        discard_stream_bytes(buffer, length, end + end_len);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+static void print_discovery_rx_debug(int port, unsigned char value, char *buffer, int length)
+{
+    char preview[49];
+    int preview_len = 0;
+    int start;
+    int i;
+    char printable;
+
+    start = length - 48;
+    if (start < 0)
+        start = 0;
+
+    for (i = start; i < length && preview_len < (int)sizeof(preview) - 1; i++)
+    {
+        unsigned char ch = (unsigned char)buffer[i];
+        if (ch >= 32 && ch <= 126)
+            preview[preview_len] = (char)ch;
+        else
+            preview[preview_len] = '.';
+        preview_len++;
+    }
+    preview[preview_len] = '\0';
+
+    if (value >= 32 && value <= 126)
+        printable = (char)value;
+    else
+        printable = '.';
+
+    println("RX COM%d len=%03d byte=%02X '%c' buf=[%s]",
+            port,
+            length,
+            (unsigned int)value,
+            printable,
+            preview);
+}
+
+static void print_discovery_buffer_debug(const char *label, int port, char *buffer, int length)
+{
+    char preview[49];
+    int preview_len = 0;
+    int start;
+    int i;
+
+    start = length - 48;
+    if (start < 0)
+        start = 0;
+
+    for (i = start; i < length && preview_len < (int)sizeof(preview) - 1; i++)
+    {
+        unsigned char ch = (unsigned char)buffer[i];
+        if (ch >= 32 && ch <= 126)
+            preview[preview_len] = (char)ch;
+        else
+            preview[preview_len] = '.';
+        preview_len++;
+    }
+    preview[preview_len] = '\0';
+
+    println("%s COM%d len=%03d buf=[%s]", label, port, length, preview);
+}
+
+static int frame_has_expected_shape(char *frame)
+{
+    if (strncmp(frame, "IAM::", 5) == 0)
+        return TRUE;
+    if (strncmp(frame, "KNOW::", 6) == 0)
+        return TRUE;
+    return FALSE;
+}
+
+static int handle_discovery_frame(char *frame,
+                                  char names[][MAX_FILENAME_LENGTH],
+                                  int *ports,
+                                  int *count,
+                                  const char *computername,
+                                  int port)
+{
+    char framecopy[DISCOVERY_PACKET_SIZE];
+    char *verb;
+    char *from;
+    char *known;
+    int changed = FALSE;
+
+    strncpy(framecopy, frame, sizeof(framecopy) - 1);
+    framecopy[sizeof(framecopy) - 1] = '\0';
+
+    if (frame_has_expected_shape(framecopy) == FALSE)
+    {
+        println("DROP frame [%s]", framecopy);
+        return FALSE;
+    }
+
+    verb = strtok(framecopy, ":");
+    if (verb == NULL)
+        return FALSE;
+
+    if (strcmp(verb, "IAM") == 0)
+    {
+        from = strtok(NULL, ":");
+        if (from != NULL)
+        {
+            trim_token(from);
+            to_upper_case(from);
+            if (from[0] != '\0' && strcmp(from, computername) != 0)
+            {
+                changed = add_or_update_route(names, ports, count, from, port);
+                if (changed == TRUE)
+                    println("Heard %-12s on COM%d", from, port);
+            }
+        }
+    }
+    else if (strcmp(verb, "KNOW") == 0)
+    {
+        from = strtok(NULL, ":");
+        known = strtok(NULL, ":");
+        if (from != NULL)
+        {
+            trim_token(from);
+            to_upper_case(from);
+            if (from[0] != '\0' && strcmp(from, computername) != 0)
+            {
+                changed = add_or_update_route(names, ports, count, from, port);
+                if (changed == TRUE)
+                    println("Heard %-12s on COM%d", from, port);
+            }
+        }
+        if (known != NULL)
+        {
+            trim_token(known);
+            to_upper_case(known);
+            if (known[0] != '\0' && strcmp(known, computername) != 0)
+            {
+                if (add_or_update_route(names, ports, count, known, port) == TRUE)
+                {
+                    changed = TRUE;
+                    println("Heard %-12s on COM%d", known, port);
+                }
+            }
+        }
+    }
+
+    return changed;
 }
 
 static int machine_list_matches(char *received_list, char names[][MAX_FILENAME_LENGTH], int *ports, int count)
@@ -382,6 +686,39 @@ int SerialManager::data_ready(unsigned int base)
 int SerialManager::transmit_ready(unsigned int base)
 {
     return ((inportb(base + UART_LSR) & LSR_THR_EMPTY) != 0);
+}
+
+void SerialManager::initialize_port(unsigned int base, int baud)
+{
+    unsigned int divisor;
+
+    if (base == 0)
+        return;
+    if (baud <= 0)
+        baud = DEFAULT_DISCOVERY_BAUD;
+
+    divisor = (unsigned int)(115200L / baud);
+    if (divisor == 0)
+        divisor = 1;
+
+    outportb(base + UART_IER, 0x00);
+    outportb(base + UART_LCR, LCR_DLAB);
+    outportb(base + UART_DLL, (unsigned char)(divisor & 0xFF));
+    outportb(base + UART_DLM, (unsigned char)((divisor >> 8) & 0xFF));
+    outportb(base + UART_LCR, LCR_8N1);
+    outportb(base + UART_FCR, 0x07);
+    outportb(base + UART_MCR, MCR_DTR_RTS_OUT2);
+}
+
+void SerialManager::flush_receive(unsigned int base)
+{
+    int guard = 0;
+
+    while (data_ready(base) == TRUE && guard < DISCOVERY_PACKET_SIZE)
+    {
+        read_byte(base);
+        guard++;
+    }
 }
 
 unsigned char SerialManager::read_byte(unsigned int base)
@@ -765,9 +1102,11 @@ void SerialManager::run_who_is_there(void)
     int port_count;
     char receive_buffers[MAX_ARGS][DISCOVERY_PACKET_SIZE];
     int receive_lengths[MAX_ARGS];
-    int seconds;
+    int cycle;
     int p;
     int converged = FALSE;
+    int discovery_baud = get_discovery_baud_local();
+    int discovery_slot;
 
     memset(route_names, 0, sizeof(route_names));
     memset(receive_buffers, 0, sizeof(receive_buffers));
@@ -781,155 +1120,158 @@ void SerialManager::run_who_is_there(void)
         strcpy(computername, "UNKNOWN");
     to_upper_case(computername);
     add_or_update_route(route_names, route_ports, &route_count, computername, 0);
+    discovery_slot = get_discovery_slot(computername);
 
     port_count = get_config_ports_local(ports, MAX_ARGS);
 
     clrscr();
     println("ZMGR Who Is There");
+    println("%s", ZMGR_BUILD_LABEL);
     println("");
     println("Local machine: %s", computername);
+    println("Discovery baud: %d 8N1", discovery_baud);
+    println("Discovery slot: %d", discovery_slot);
     println("Using configured ports:");
     for (p = 0; p < port_count; p++)
+    {
+        unsigned int base = get_com_base(ports[p]);
+
         println("  COM%d", ports[p]);
+        if (base != 0 && uart_present(base) == TRUE)
+        {
+            initialize_port(base, discovery_baud);
+            flush_receive(base);
+        }
+    }
     println("");
     println("Sending discovery packets. Press X to stop.");
     println("");
 
-    for (seconds = 0; seconds < DISCOVERY_SECONDS && converged == FALSE; seconds++)
+    for (cycle = 0; cycle < DISCOVERY_CYCLES && converged == FALSE; cycle++)
     {
-        char machine_list[DISCOVERY_PACKET_SIZE] = {"\0"};
-        char packet[DISCOVERY_PACKET_SIZE] = {"\0"};
-
-        build_machine_list(route_names, route_ports, route_count, machine_list, sizeof(machine_list));
-        sprintf(packet, "WHO_THERE\r\nFROM=%s\r\nMACHINE_LIST=%s\r\nEND\r\n", computername, machine_list);
-
-        for (p = 0; p < port_count; p++)
-        {
-            unsigned int base = get_com_base(ports[p]);
-            char *outptr = packet;
-
-            if (base == 0 || uart_present(base) == FALSE)
-                continue;
-
-            while (*outptr != '\0')
-            {
-                int waitcount = 0;
-                while (transmit_ready(base) == FALSE && waitcount < 1000)
-                {
-                    delay(1);
-                    waitcount++;
-                }
-                if (transmit_ready(base) == TRUE)
-                    write_byte(base, (unsigned char)*outptr);
-                outptr++;
-            }
-        }
-
-        for (p = 0; p < 10; p++)
+        for (p = 0; p < DISCOVERY_SLOT_COUNT; p++)
         {
             int port_index;
+            int listen_tick;
             if (kbhit())
             {
                 char key = getch();
                 if (key == 'x' || key == 'X')
-                    seconds = DISCOVERY_SECONDS;
+                    cycle = DISCOVERY_CYCLES;
             }
 
-            for (port_index = 0; port_index < port_count; port_index++)
+            if (p == discovery_slot)
             {
-                unsigned int base = get_com_base(ports[port_index]);
-
-                if (base == 0)
-                    continue;
-
-                while (data_ready(base) == TRUE)
+                for (port_index = 0; port_index < port_count; port_index++)
                 {
-                    unsigned char value = read_byte(base);
-                    int length = receive_lengths[port_index];
+                    unsigned int base = get_com_base(ports[port_index]);
+                    char packet[DISCOVERY_PACKET_SIZE];
+                    int route_index;
+                    int know_index;
 
-                    if (length < DISCOVERY_PACKET_SIZE - 1)
+                    if (base == 0 || uart_present(base) == FALSE)
+                        continue;
+
+                    memset(packet, 0, sizeof(packet));
+                    build_iam_frame(computername, packet);
                     {
-                        receive_buffers[port_index][length] = (char)value;
-                        length++;
-                        receive_buffers[port_index][length] = '\0';
-                        receive_lengths[port_index] = length;
-                    }
-                    else
-                    {
-                        receive_lengths[port_index] = 0;
-                        receive_buffers[port_index][0] = '\0';
-                    }
-
-                    if (strstr(receive_buffers[port_index], "END") != NULL)
-                    {
-                        char packetcopy[DISCOVERY_PACKET_SIZE];
-                        char *line;
-                        char from_machine[MAX_FILENAME_LENGTH] = {"\0"};
-                        char received_list[DISCOVERY_PACKET_SIZE] = {"\0"};
-                        int changed = FALSE;
-
-                        strncpy(packetcopy, receive_buffers[port_index], sizeof(packetcopy) - 1);
-                        packetcopy[sizeof(packetcopy) - 1] = '\0';
-
-                        line = strtok(packetcopy, "\r\n");
-                        while (line != NULL)
+                        char *outptr = packet;
+                        while (*outptr != '\0')
                         {
-                            if (strncmp(line, "FROM=", 5) == 0)
+                            int waitcount = 0;
+                            while (transmit_ready(base) == FALSE && waitcount < 1000)
                             {
-                                strncpy(from_machine, line + 5, sizeof(from_machine) - 1);
-                                from_machine[sizeof(from_machine) - 1] = '\0';
-                                trim_token(from_machine);
+                                delay(1);
+                                waitcount++;
                             }
-                            else if (strncmp(line, "MACHINE_LIST=", 13) == 0)
-                            {
-                                strncpy(received_list, line + 13, sizeof(received_list) - 1);
-                                received_list[sizeof(received_list) - 1] = '\0';
-                                trim_token(received_list);
-                            }
-                            line = strtok(NULL, "\r\n");
+                            if (transmit_ready(base) == TRUE)
+                                write_byte(base, (unsigned char)*outptr);
+                            outptr++;
                         }
+                    }
 
-                        if (from_machine[0] != '\0' && strcmp(from_machine, computername) != 0)
+                    if (route_count > 0)
+                    {
+                        know_index = cycle % route_count;
+                        for (route_index = 0; route_index < route_count; route_index++)
                         {
-                            changed = add_or_update_route(route_names, route_ports, &route_count, from_machine, ports[port_index]);
-                            println("Heard %-12s on COM%d", from_machine, ports[port_index]);
-                        }
-
-                        if (received_list[0] != '\0')
-                        {
-                            char listcopy[DISCOVERY_PACKET_SIZE];
-                            char comparecopy[DISCOVERY_PACKET_SIZE];
-                            char *token;
-                            strncpy(listcopy, received_list, sizeof(listcopy) - 1);
-                            listcopy[sizeof(listcopy) - 1] = '\0';
-                            token = strtok(listcopy, ",");
-                            while (token != NULL)
+                            int index = (know_index + route_index) % route_count;
+                            if (route_names[index][0] == '\0')
+                                continue;
+                            memset(packet, 0, sizeof(packet));
+                            build_know_frame(computername, route_names[index], packet);
                             {
-                                char machinename[MAX_FILENAME_LENGTH];
-                                strncpy(machinename, token, sizeof(machinename) - 1);
-                                machinename[sizeof(machinename) - 1] = '\0';
-                                trim_token(machinename);
-                                to_upper_case(machinename);
-                                if (strcmp(machinename, computername) != 0)
+                                char *outptr = packet;
+                                while (*outptr != '\0')
                                 {
-                                    if (add_or_update_route(route_names, route_ports, &route_count, machinename, ports[port_index]) == TRUE)
-                                        changed = TRUE;
+                                    int waitcount = 0;
+                                    while (transmit_ready(base) == FALSE && waitcount < 1000)
+                                    {
+                                        delay(1);
+                                        waitcount++;
+                                    }
+                                    if (transmit_ready(base) == TRUE)
+                                        write_byte(base, (unsigned char)*outptr);
+                                    outptr++;
                                 }
-                                token = strtok(NULL, ",");
                             }
-
-                            strncpy(comparecopy, received_list, sizeof(comparecopy) - 1);
-                            comparecopy[sizeof(comparecopy) - 1] = '\0';
-                            if (machine_list_matches(comparecopy, route_names, route_ports, route_count) == TRUE && changed == FALSE)
-                                converged = TRUE;
+                            break;
                         }
-
-                        receive_lengths[port_index] = 0;
-                        receive_buffers[port_index][0] = '\0';
                     }
                 }
             }
-            delay(100);
+
+            for (listen_tick = 0; listen_tick < DISCOVERY_SLOT_TICKS; listen_tick++)
+            {
+                for (port_index = 0; port_index < port_count; port_index++)
+                {
+                    unsigned int base = get_com_base(ports[port_index]);
+
+                    if (base == 0)
+                        continue;
+
+                    while (data_ready(base) == TRUE)
+                    {
+                        unsigned char value = read_byte(base);
+                        int length = receive_lengths[port_index];
+
+                        if (length < DISCOVERY_PACKET_SIZE - 1)
+                        {
+                            receive_buffers[port_index][length] = (char)value;
+                            length++;
+                            receive_buffers[port_index][length] = '\0';
+                            receive_lengths[port_index] = length;
+                            print_discovery_rx_debug(ports[port_index], value, receive_buffers[port_index], receive_lengths[port_index]);
+                        }
+                        else
+                        {
+                            receive_lengths[port_index] = 0;
+                            receive_buffers[port_index][0] = '\0';
+                        }
+
+                        {
+                            char frame[DISCOVERY_PACKET_SIZE];
+
+                            memset(frame, 0, sizeof(frame));
+                            while (read_discovery_frame(receive_buffers[port_index],
+                                                        &receive_lengths[port_index],
+                                                        frame,
+                                                        sizeof(frame)) == TRUE)
+                            {
+                                println("FRAME COM%d [%s]", ports[port_index], frame);
+                                handle_discovery_frame(frame,
+                                                       route_names,
+                                                       route_ports,
+                                                       &route_count,
+                                                       computername,
+                                                       ports[port_index]);
+                            }
+                            print_discovery_buffer_debug("POST", ports[port_index], receive_buffers[port_index], receive_lengths[port_index]);
+                        }
+                    }
+                }
+                delay(1);
+            }
         }
     }
 

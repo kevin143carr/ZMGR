@@ -1,0 +1,8 @@
+#ifndef APPINFO_H_INCLUDED
+#define APPINFO_H_INCLUDED
+
+#define ZMGR_VERSION "v2.1.0"
+#define ZMGR_BUILD __DATE__ " " __TIME__
+#define ZMGR_BUILD_LABEL ZMGR_VERSION " " ZMGR_BUILD
+
+#endif

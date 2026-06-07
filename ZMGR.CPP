@@ -4,6 +4,7 @@
 #include <STDIO.H>
 #include <STDLIB.H>
 #include <STRING.H>
+#include "APPINFO.H"
 
 #define MENU_WIDTH 40
 #define MENU_LEFT 20
@@ -70,21 +71,22 @@ void draw_main_menu(int countdown, int countdown_active)
 {
 	titlescreen();
 	draw_border(MENU_LEFT, MENU_TOP, MENU_WIDTH, 17);
-	print_centered(MENU_TOP + 1, "ZMGR v2");
+	print_centered(MENU_TOP + 1, "ZMGR " ZMGR_VERSION);
 	print_centered(MENU_TOP + 2, "ZModem Manager");
-	draw_separator(MENU_LEFT, MENU_TOP + 3, MENU_WIDTH);
+	print_centered(MENU_TOP + 3, ZMGR_BUILD);
+	draw_separator(MENU_LEFT, MENU_TOP + 4, MENU_WIDTH);
 
-	gotoxy(MENU_LEFT + 4, MENU_TOP + 5);
-	cprintf("1. File Transfer");
 	gotoxy(MENU_LEFT + 4, MENU_TOP + 6);
-	cprintf("2. Forward File");
+	cprintf("1. File Transfer");
 	gotoxy(MENU_LEFT + 4, MENU_TOP + 7);
-	cprintf("3. Serial Pass-through");
+	cprintf("2. Forward File");
 	gotoxy(MENU_LEFT + 4, MENU_TOP + 8);
-	cprintf("4. Port Diagnostics");
+	cprintf("3. Serial Pass-through");
 	gotoxy(MENU_LEFT + 4, MENU_TOP + 9);
-	cprintf("5. Configuration");
+	cprintf("4. Port Diagnostics");
 	gotoxy(MENU_LEFT + 4, MENU_TOP + 10);
+	cprintf("5. Configuration");
+	gotoxy(MENU_LEFT + 4, MENU_TOP + 11);
 	cprintf("X. Exit");
 
 	draw_separator(MENU_LEFT, MENU_TOP + 12, MENU_WIDTH);
