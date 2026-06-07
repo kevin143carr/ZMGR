@@ -14,7 +14,7 @@ if [[ -z "$SERVER_HOST" ]]; then
   exit 1
 fi
 
-TMP_CONFIG="$(mktemp "${TMPDIR:-/tmp}/zmgr-client.XXXXXX.conf")"
+TMP_CONFIG="$(mktemp "${TMPDIR:-/tmp}/zmgr-client.XXXXXX")"
 sed "s/server:127.0.0.1/server:${SERVER_HOST}/" "$CONFIG" > "$TMP_CONFIG"
 
 if [[ -f "$HELPER" ]]; then
