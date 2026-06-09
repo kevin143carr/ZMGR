@@ -1,6 +1,6 @@
 # ZMGR
 
-Version: v2.1.0
+Version: v2.2.0
 
 ZModem Manager is a Borland C++ 3.1 MS-DOS wrapper for PDZM (Public Domain ZModem), created by Peter Mandrella, 1994-1998. PDZM handles ZModem transfers over null modem cable or dial-up modem; ZMGR provides the launcher menu, while helper EXEs handle file transfer, forwarding, serial pass-through, and diagnostics.
 
@@ -10,12 +10,12 @@ Runtime behavior is controlled by `ZMMGR.CFG`.
 
 Important keys:
 
-- `COMPUTERNAME`: local machine name, used to identify `.FIL` files intended for this machine.
+- `COMPUTERNAME`: local machine name, used to identify `.FIL` files intended for this machine. If blank, `ZMGR.EXE run` asks for it before starting.
 - `DOWNLOADFOLDER`: folder where PDZM receives files.
 - `UPLOADFOLDER`: folder scanned before download mode for outgoing files.
 - `KEEPFOLDER`: destination for files forwarded to this machine.
 - `EXECPATH`: path to `ZM.EXE`.
-- `PORTS`: comma-separated COM ports to use one at a time, such as `1` or `1,2`.
+- `PORTS`: comma-separated COM ports to use one at a time, such as `1` or `1,2`. It may be blank on a fresh install; use Port Diagnostics to detect and update it.
 - `ZMOPTIONS`: shared PDZM options. ZMGR adds `-cN`, `rz`, `sz`, and file paths automatically.
 - `STARTUPSTATE`: `MENU` or `FILETRANSFER`.
 - `MENUCOUNTDOWN`: seconds before the menu auto-starts file transfer. Press `ESC` on the menu to cancel the countdown.
@@ -69,7 +69,7 @@ Build the executable first:
 ./dosbox/build_zmgr.sh
 ```
 
-The local release package for v2.1.0 is assembled under `dist/v2.1.0/` and includes:
+The local release package is assembled under `dist/test/<branch>/` for hardware test builds and includes:
 
 - `ZMGR.EXE`
 - `ZMFT.EXE`
@@ -82,4 +82,4 @@ The local release package for v2.1.0 is assembled under `dist/v2.1.0/` and inclu
 - `VERSION`
 - `RELEASE_NOTES.md`
 
-Upload the ZIP from `dist/v2.1.0/` to the matching GitHub release.
+Upload the ZIP from `dist/test/<branch>/` to the matching GitHub release.

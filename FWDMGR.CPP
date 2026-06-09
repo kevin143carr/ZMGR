@@ -30,8 +30,6 @@ void ForwardManager::initialize_arrays()
     forwardfilecontentsarray->max_size_of_strings = MAX_FILENAME_LENGTH;
     forwardfilecontentsarray->array = memmgr->allocate_string_array(forwardfilecontentsarray->count, forwardfilecontentsarray->max_size_of_strings);
 
-    println("Arrays Allocated");
-
     clear_arrays();
 }
 
@@ -48,8 +46,6 @@ void ForwardManager::cleanupforwardmanager()
         memmgr->free_string_array(forwardfilelist->array, MAX_LINES);
         forwardfilelist->array = NULL;
     }
-
-    println("Cleared Memory, Count = %d", memmgr->get_pointer_count());
 }
 
 int ForwardManager::checkforforwardfiles(char *sourcefolder)

@@ -9,6 +9,38 @@
 #define MENU_WIDTH 40
 #define MENU_LEFT 20
 #define MENU_TOP 4
+#define CFG_LINE_LEN 180
+
+void strip_newline(char *value)
+{
+	char *pos;
+
+	pos = strchr(value, '\n');
+	if (pos != NULL)
+		*pos = '\0';
+	pos = strchr(value, '\r');
+	if (pos != NULL)
+		*pos = '\0';
+}
+
+void trim_value(char *value)
+{
+	char *start;
+	char *end;
+
+	start = value;
+	while (*start == ' ')
+		start++;
+	if (start != value)
+		memmove(value, start, strlen(start) + 1);
+
+	end = value + strlen(value);
+	while (end > value && (*(end - 1) == ' ' || *(end - 1) == '\n' || *(end - 1) == '\r'))
+	{
+		*(end - 1) = '\0';
+		end--;
+	}
+}
 
 void print_centered(int row, const char *text)
 {
@@ -134,10 +166,8 @@ int read_config_value(const char *key, char *value, int max_len)
 				start++;
 			strncpy(value, start, max_len - 1);
 			value[max_len - 1] = '\0';
-			if (strchr(value, '\n') != NULL)
-				*strchr(value, '\n') = '\0';
-			if (strchr(value, '\r') != NULL)
-				*strchr(value, '\r') = '\0';
+			strip_newline(value);
+			trim_value(value);
 			fclose(file);
 			return 1;
 		}
@@ -145,6 +175,184 @@ int read_config_value(const char *key, char *value, int max_len)
 
 	fclose(file);
 	return 0;
+}
+
+int line_matches_config_key(char *line, const char *key)
+{
+	char work[CFG_LINE_LEN];
+	char *equal;
+
+	if (line[0] == '#')
+		return 0;
+
+	strncpy(work, line, sizeof(work) - 1);
+	work[sizeof(work) - 1] = '\0';
+	equal = strchr(work, '=');
+	if (equal == NULL)
+		return 0;
+
+	*equal = '\0';
+	trim_value(work);
+	strupr(work);
+
+	return (strcmp(work, key) == 0);
+}
+
+int write_config_backup()
+{
+	FILE *infile;
+	FILE *outfile;
+	char line[CFG_LINE_LEN];
+
+	infile = fopen("ZMMGR.CFG", "r");
+	if (infile == NULL)
+		return 0;
+
+	outfile = fopen("ZMMGR.BAK", "w");
+	if (outfile == NULL)
+	{
+		fclose(infile);
+		return 0;
+	}
+
+	while (fgets(line, sizeof(line), infile) != NULL)
+		fputs(line, outfile);
+
+	fclose(infile);
+	fclose(outfile);
+	return 1;
+}
+
+int update_config_value(const char *key, const char *new_value)
+{
+	FILE *infile;
+	FILE *outfile;
+	char line[CFG_LINE_LEN];
+	int found = 0;
+
+	write_config_backup();
+
+	infile = fopen("ZMMGR.CFG", "r");
+	if (infile == NULL)
+		return 0;
+
+	outfile = fopen("ZMMGR.TMP", "w");
+	if (outfile == NULL)
+	{
+		fclose(infile);
+		return 0;
+	}
+
+	while (fgets(line, sizeof(line), infile) != NULL)
+	{
+		if (line_matches_config_key(line, key))
+		{
+			fprintf(outfile, "%s = %s\n", key, new_value);
+			found = 1;
+		}
+		else
+			fputs(line, outfile);
+	}
+
+	if (!found)
+		fprintf(outfile, "%s = %s\n", key, new_value);
+
+	fclose(infile);
+	fclose(outfile);
+
+	remove("ZMMGR.CFG");
+	if (rename("ZMMGR.TMP", "ZMMGR.CFG") != 0)
+		return 0;
+
+	return 1;
+}
+
+void prompt_for_required_config(void)
+{
+	char computername[CFG_LINE_LEN] = {"\0"};
+	char ports[CFG_LINE_LEN] = {"\0"};
+	int have_computername;
+	int have_ports;
+	int row;
+
+	have_computername = read_config_value("COMPUTERNAME", computername, sizeof(computername));
+	have_ports = read_config_value("PORTS", ports, sizeof(ports));
+
+	if (have_computername && computername[0] != '\0' && have_ports && ports[0] != '\0')
+		return;
+
+	_setcursortype(_NORMALCURSOR);
+	clrscr();
+	draw_border(8, 4, 64, 17);
+	gotoxy(27, 5);
+	cprintf("ZMGR First-Time Setup");
+	draw_separator(8, 6, 64);
+	gotoxy(12, 8);
+	cprintf("Every machine needs a unique COMPUTERNAME.");
+	gotoxy(12, 9);
+	cprintf("PORTS can be blank if you want diagnostics to find them.");
+
+	while (computername[0] == '\0')
+	{
+		gotoxy(12, 11);
+		cprintf("Computer name:                                      ");
+		gotoxy(27, 11);
+		fgets(computername, sizeof(computername), stdin);
+		strip_newline(computername);
+		trim_value(computername);
+		strupr(computername);
+		if (computername[0] == '\0')
+		{
+			gotoxy(12, 13);
+			cprintf("COMPUTERNAME is required.                         ");
+		}
+	}
+
+	if (!update_config_value("COMPUTERNAME", computername))
+	{
+		gotoxy(12, 13);
+		cprintf("Could not update COMPUTERNAME in ZMMGR.CFG");
+		gotoxy(12, 14);
+		cprintf("Press any key to continue");
+		getch();
+	}
+
+	if (!have_ports || ports[0] == '\0')
+	{
+		for (row = 12; row <= 16; row++)
+		{
+			gotoxy(12, row);
+			cprintf("                                                        ");
+		}
+		gotoxy(12, 12);
+		cprintf("COM ports, like 1 or 1,2:");
+		gotoxy(12, 13);
+		cprintf("Leave blank if unsure.");
+		gotoxy(12, 15);
+		cprintf("PORTS: ");
+		fgets(ports, sizeof(ports), stdin);
+		strip_newline(ports);
+		trim_value(ports);
+
+		if (!update_config_value("PORTS", ports))
+		{
+			gotoxy(12, 17);
+			cprintf("Could not update PORTS in ZMMGR.CFG");
+			gotoxy(12, 18);
+			cprintf("Press any key to continue");
+			getch();
+		}
+		else if (ports[0] == '\0')
+		{
+			gotoxy(12, 17);
+			cprintf("Use Port Diagnostics to find and update COM ports.");
+			gotoxy(12, 18);
+			cprintf("Press any key to continue");
+			getch();
+		}
+	}
+
+	_setcursortype(_NOCURSOR);
 }
 
 int get_menu_countdown()
@@ -303,11 +511,20 @@ int main(int argc, char *argv[])
 		strupr(argval);
 
 		if (strcmp(argval, "RUN") == 0)
+		{
+			prompt_for_required_config();
 			runzmgr(argv[0]);
+		}
 		else if (strcmp(argval, "-I") == 0)
+		{
+			prompt_for_required_config();
 			execute_tool(argv[0], "ZMFT.EXE", "FORWARD");
+		}
 		else if (strcmp(argval, "-F") == 0 || strcmp(argval, "-FF") == 0)
+		{
+			prompt_for_required_config();
 			execute_tool(argv[0], "ZMFT.EXE", "FORWARD");
+		}
 		else
 		{
 			printhelp();

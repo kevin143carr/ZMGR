@@ -1,22 +1,18 @@
-# ZMGR v2.1.0 NextGen1
+# ZMGR v2.2.0 NextGen1
 
-First NextGen1 text-mode release.
+Hardware-tested NextGen1 routing and forwarding release.
 
 ## Changes
 
-- Split the application into focused DOS executables:
-  - `ZMGR.EXE`: text-mode launcher menu.
-  - `ZMFT.EXE`: file transfer and forwarding.
-  - `ZMSER.EXE`: serial pass-through.
-  - `ZMDIAG.EXE`: serial diagnostics and route discovery.
-  - `ZMCFG.EXE`: text-mode configuration editor.
-- Added a centered double-border launcher menu with configurable startup countdown.
-- Added `STARTUPSTATE` and `MENUCOUNTDOWN` runtime settings.
-- Replaced per-command transfer params with `PORTS` and shared `ZMOPTIONS`.
-- Added a text-mode configuration editor that preserves comments and creates `ZMMGR.BAK`.
-- Added improved COM diagnostics with base address, standard IRQ, UART type, and baud guidance.
-- Added `Who Is There` route discovery, writing learned next-hop routes to `ZMROUTES.TXT`.
-- Added full-path forwarding wizard while preserving `.FIL` forwarding files.
+- Added `Who Is There` multi-hop route learning with checksum-protected discovery packets.
+- Added `ZMROUTES.TXT` next-hop routing for forwarded `.FIL` uploads.
+- Fixed relay behavior so forwarded files do not bounce back to the inbound COM port.
+- Added `MULTI.FIL` support for one payload delivered to multiple named receivers.
+- Added first-run setup for blank `COMPUTERNAME` and optional blank `PORTS`.
+- Updated default `ZMOPTIONS` with `-o1` so PDZM overwrites received files instead of auto-renaming.
+- Added COM diagnostics prompt to update `PORTS` from detected non-mouse serial ports.
+- Improved ZMDIAG, first-run setup, and Forward File screens with double-border UI.
+- Removed startup debug output from the file-transfer path.
 
 ## Build
 

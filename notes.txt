@@ -8,3 +8,186 @@ July 6th 2024 program size standard build = 158,789
     It works better, but the foot print is bigger.
 
     Removed unused code build = 149,841
+
+June 8th 2026 next-session routing plan
+    Discovery is now talking between machines after removing byte-by-byte
+    serial receive logging, accepting >>> as the discovery frame terminator,
+    and skipping self-referential KNOW packets.
+
+    Hardware topology tested:
+        JEAN   COM1 <-> COM1 MELBA
+        MELBA  COM2 <-> COM2 MIDWAY
+        MIDWAY COM4 <-> COM1 FRANKY
+
+    JEAN and FRANKY are at the ends of the line. They only have one direct
+    serial neighbor, but they still need to learn all reachable machines.
+
+    Target route tables:
+        JEAN:
+            JEAN=LOCAL
+            MELBA=1
+            MIDWAY=1
+            FRANKY=1
+
+        MELBA:
+            JEAN=1
+            MELBA=LOCAL
+            MIDWAY=2
+            FRANKY=2
+
+        MIDWAY:
+            JEAN=2
+            MELBA=2
+            MIDWAY=LOCAL
+            FRANKY=4
+
+        FRANKY:
+            JEAN=1
+            MELBA=1
+            MIDWAY=1
+            FRANKY=LOCAL
+
+    Routing rule:
+        A machine only needs to know the next outbound COM port. When a
+        machine hears another machine advertise reachable names on COMx,
+        every advertised remote name should be recorded as reachable through
+        COMx unless it is the local machine.
+
+    Next implementation idea:
+        Replace or extend KNOW::<sender>::<one-machine> so each machine can
+        advertise all known reachable machines. Merge learned names through
+        the COM port where the advertisement arrived. This lets routes travel
+        across the full serial chain, not just direct neighbors.
+
+June 9th 2026 routing discovery update
+    KNOW packets now advertise a comma-separated list of known machines:
+        KNOW::<sender>::<machine>,<machine>,...
+
+    Receivers merge every advertised remote machine through the COM port where
+    the KNOW packet arrived, skipping the local machine. Transmit uses a
+    split-horizon rule and does not advertise routes back out the same COM
+    port where they were learned.
+
+    Who Is There now keeps running until the operator presses ESC, X, or x.
+
+    COM Port Information now offers to update ZMMGR.CFG PORTS with the
+    BIOS-listed COM ports, excluding the inferred mouse COM port when one can
+    be identified. If the mouse COM port is ambiguous, it does not offer an
+    automatic update. It writes ZMMGR.BAK before replacing the active PORTS
+    line.
+
+    Who Is There stop key is X only. During noisy discovery output it repeats
+    a "Press X to stop discovery" reminder about every ten discovery lines.
+    On exit it shuts down initialized UARTs so the next PDZM transfer starts
+    from a clean serial state.
+
+    ZMFT now checks ZMROUTES.TXT for the first upload .FIL target and tries
+    the learned next-hop COM port first. If no route is found it keeps the
+    configured PORTS order.
+
+    Discovery packets now carry a simple 16-bit checksum:
+        IAM::JEAN::CS=xxxx
+        KNOW::JEAN::MELBA,MIDWAY::CS=xxxx
+
+    Frames with missing or bad checksums are dropped. This prevents dropped
+    serial bytes from turning a valid machine name like JEAN into a bogus
+    route such as JAN. Full frame echoing was also removed from the receive
+    loop to reduce polling delays while discovery is active.
+
+    Distribution ZMMGR.CFG now leaves COMPUTERNAME and PORTS blank. On first
+    ZMGR.EXE run, ZMGR requires a COMPUTERNAME and writes it back to
+    ZMMGR.CFG. PORTS may remain blank; the user is told to use Port
+    Diagnostics later if unsure.
+
+    ZMOPTIONS now includes -o1 so PDZM receive overwrites existing files
+    instead of auto-renaming incoming files such as NEXTGEN1.ZIP to .ZI3.
+
+    UI cleanup:
+        Removed the "Arrays Allocated" startup debug print from the file
+        transfer path.
+        ZMDIAG now uses the same double-border menu style as ZMGR.
+        First-time ZMGR setup and the Forward File wizard now use bordered
+        prompts instead of plain scrolling text.
+
+    MULTI.FIL multicast forwarding:
+        Main menu option 2 now accepts comma-separated receiver names. A
+        single name still creates NAME.FIL. Multiple names create MULTI.FIL.
+
+        MULTI.FIL format:
+            NAME1,NAME2,NAME3
+            C:\PATH\PAYLOAD.ZIP
+
+        ZMFT sends MULTI.FIL by building a temporary ZMSEND.LST containing
+        the payload path and MULTI.FIL itself, so PDZM does not treat the
+        recipient list as a file to send.
+
+        When a machine receives MULTI.FIL, it copies or moves the payload to
+        KEEPFOLDER if its COMPUTERNAME is listed, removes its own name from
+        the recipient list, and forwards the updated MULTI.FIL if names
+        remain. If its name is not listed, it forwards the package unchanged.
+
+        Upload routing gives MULTI.FIL priority and routes toward the first
+        remaining recipient in the comma-separated list.
+
+    ZMFT route selection fix:
+        For normal NAME.FIL uploads, ZMFT now scans all .FIL files in the
+        upload folder and uses the first target with a known ZMROUTES.TXT
+        route, instead of trusting the first DOS directory entry. The transfer
+        screen prints "Route NAME via COMx" when a route is found, and shows
+        "NO ROUTE" on the first attempted port when no route matched.
+
+        ZMFT now searches for ZMROUTES.TXT beside ZMFT.EXE first, then falls
+        back to the current directory. Route names and values are trimmed
+        before comparison so hand-edited spacing does not break route lookup.
+
+        Relay loop fix: after a machine receives and stages a forwarded file,
+        ZMFT now stops the current port pass and recomputes the route before
+        attempting upload. If no route is found, it avoids immediately sending
+        the staged package back out the same COM port it arrived on.
+
+June 9th 2026 self-update distribution plan
+    Build a separate updater program, likely ZMUPD.EXE, rather than putting
+    self-update replacement logic directly into ZMGR or ZMFT.
+
+    Update package idea:
+        ZMUPDATE directory/package containing:
+            MANIFEST.TXT
+            ZMGR.EXE
+            ZMFT.EXE
+            ZMDIAG.EXE
+            ZMCFG.EXE
+            VERSION
+            optional next-hop or after-update .FIL instructions
+
+    MANIFEST.TXT should describe the update:
+        VERSION=<new version>
+        TARGET=<machine name or ANY>
+        NEXT=<route/chain behavior>
+        FILES=<comma-separated file list>
+
+    Receiving flow:
+        ZMFT downloads the update into the download folder.
+        The update is staged into a safe update folder, not copied over live
+        running EXE files immediately.
+        ZMGR or ZMFT schedules ZMUPD.EXE through an update marker or existing
+        ONCEDOSCOMMAND-style mechanism.
+
+    ZMUPD.EXE flow:
+        Back up current live files first.
+        Copy staged files into place while ZMGR/ZMFT are not running.
+        Verify copied files by size or checksum where practical.
+        Mark local update complete.
+        Create or preserve the forward package for the next machine.
+
+    Distribution strategy:
+        Prefer chain-style updates first, with an ordered machine list such as
+        JEAN,MELBA,MIDWAY,FRANKY. This is safer than broadcast-style routing
+        because it avoids update loops and is easier to debug on the serial
+        line topology.
+
+    Open design questions:
+        Exact manifest format.
+        Whether update forwarding uses one package with an ordered chain or
+        creates a new .FIL at each hop.
+        How much verification is needed on DOS-era machines: file size only,
+        simple checksum, or both.

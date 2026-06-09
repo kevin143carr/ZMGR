@@ -26,6 +26,9 @@ private:
 
     int pause_or_exit(void);
     int get_port_list(int *ports, int max_ports);
+    int get_route_port_for_machine(char *machine);
+    int get_routed_upload_port(void);
+    int build_port_order(int *ports, int portcount, int routed_port, int avoid_port, int *ordered_ports, int max_ports);
     void execute_once_hooks(void);
     void execute_external_tool(char *toolname);
 

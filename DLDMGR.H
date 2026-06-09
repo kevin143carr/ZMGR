@@ -12,6 +12,7 @@ private:
     ConfigClass *config;
     ForwardManager* forwardmanager;
 	Transfer *tranfer;
+    int processmultifile();
 
 public:
     DownloadManager();

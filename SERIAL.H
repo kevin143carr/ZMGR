@@ -17,6 +17,7 @@ private:
     int transmit_ready(unsigned int base);
     void initialize_port(unsigned int base, int baud);
     void flush_receive(unsigned int base);
+    void shutdown_port(unsigned int base);
     void write_byte(unsigned int base, unsigned char value);
     unsigned char read_byte(unsigned int base);
     void update_zmodem_watch(char *buffer, int *length, unsigned char value, const char *direction);

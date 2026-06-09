@@ -34,15 +34,24 @@
 
 #define MSD_REPORT_FILE "REPORT.TXT"
 #define ROUTE_FILE "ZMROUTES.TXT"
+#define CONFIG_FILE "ZMMGR.CFG"
+#define CONFIG_BACKUP_FILE "ZMMGR.BAK"
+#define CONFIG_TEMP_FILE "ZMMGR.TMP"
 #define DEFAULT_DISCOVERY_BAUD 1200
 #define MAX_DISCOVERY_BAUD 1200
-#define DISCOVERY_CYCLES 6
 #define DISCOVERY_SLOT_COUNT 10
 #define DISCOVERY_SLOT_TICKS 1000
+#define DISCOVERY_REMINDER_LINES 10
 #define DISCOVERY_PACKET_SIZE 512
+#define DISCOVERY_KNOWN_LIST_SIZE 360
 #define MAX_DISCOVERY_MACHINES 16
 #define DISCOVERY_BEGIN_MARKER "<<<"
-#define DISCOVERY_END_MARKER ">>>\r\n"
+#define DISCOVERY_END_MARKER ">>>"
+#define DISCOVERY_CHECKSUM_MARKER "::CS="
+
+static void trim_token(char *value);
+static void to_upper_case(char *value);
+static void append_machine_to_list(char *output, int output_len, const char *name);
 
 static int read_config_value_local(const char *key, char *value, int max_len)
 {
@@ -51,7 +60,7 @@ static int read_config_value_local(const char *key, char *value, int max_len)
     int key_len = strlen(key);
 
     value[0] = '\0';
-    file = fopen("ZMMGR.CFG", "r");
+    file = fopen(CONFIG_FILE, "r");
     if (file == NULL)
         return FALSE;
 
@@ -84,6 +93,107 @@ static int read_config_value_local(const char *key, char *value, int max_len)
 
     fclose(file);
     return FALSE;
+}
+
+static int line_matches_config_key(char *line, const char *key)
+{
+    char work[MAX_CONFIG_SIZE];
+    char *equal;
+
+    if (line[0] == '#')
+        return FALSE;
+
+    strncpy(work, line, sizeof(work) - 1);
+    work[sizeof(work) - 1] = '\0';
+    equal = strchr(work, '=');
+    if (equal == NULL)
+        return FALSE;
+
+    *equal = '\0';
+    trim_token(work);
+    to_upper_case(work);
+
+    return (strcmp(work, key) == 0);
+}
+
+static int write_config_backup_local(void)
+{
+    FILE *infile;
+    FILE *outfile;
+    char line[MAX_CONFIG_SIZE];
+
+    infile = fopen(CONFIG_FILE, "r");
+    if (infile == NULL)
+        return FALSE;
+
+    outfile = fopen(CONFIG_BACKUP_FILE, "w");
+    if (outfile == NULL)
+    {
+        fclose(infile);
+        return FALSE;
+    }
+
+    while (fgets(line, sizeof(line), infile) != NULL)
+        fputs(line, outfile);
+
+    fclose(infile);
+    fclose(outfile);
+    return TRUE;
+}
+
+static int update_config_ports_local(const char *ports_value)
+{
+    FILE *infile;
+    FILE *outfile;
+    char line[MAX_CONFIG_SIZE];
+    int found = FALSE;
+
+    if (write_config_backup_local() == FALSE)
+        return FALSE;
+
+    infile = fopen(CONFIG_FILE, "r");
+    if (infile == NULL)
+        return FALSE;
+
+    outfile = fopen(CONFIG_TEMP_FILE, "w");
+    if (outfile == NULL)
+    {
+        fclose(infile);
+        return FALSE;
+    }
+
+    while (fgets(line, sizeof(line), infile) != NULL)
+    {
+        if (line_matches_config_key(line, "PORTS") == TRUE)
+        {
+            fprintf(outfile, "PORTS = %s\n", ports_value);
+            found = TRUE;
+        }
+        else
+        {
+            fputs(line, outfile);
+        }
+    }
+
+    if (found == FALSE)
+        fprintf(outfile, "PORTS = %s\n", ports_value);
+
+    fclose(infile);
+    fclose(outfile);
+
+    remove(CONFIG_FILE);
+    if (rename(CONFIG_TEMP_FILE, CONFIG_FILE) != 0)
+        return FALSE;
+
+    return TRUE;
+}
+
+static void append_port_to_list(char *output, int output_len, int port)
+{
+    char port_text[8];
+
+    sprintf(port_text, "%d", port);
+    append_machine_to_list(output, output_len, port_text);
 }
 
 static int get_config_ports_local(int *ports, int max_ports)
@@ -247,6 +357,28 @@ static void sort_routes(char names[][MAX_FILENAME_LENGTH], int *ports, int count
     }
 }
 
+static void append_machine_to_list(char *output, int output_len, const char *name)
+{
+    int current_len;
+    int name_len;
+    int separator_len = 0;
+
+    if (output_len <= 1)
+        return;
+
+    current_len = strlen(output);
+    name_len = strlen(name);
+    if (output[0] != '\0')
+        separator_len = 1;
+
+    if (current_len + separator_len + name_len >= output_len)
+        return;
+
+    if (separator_len > 0)
+        strcat(output, ",");
+    strcat(output, name);
+}
+
 static void build_machine_list(char names[][MAX_FILENAME_LENGTH], int *ports, int count, char *output, int output_len)
 {
     int i;
@@ -256,9 +388,7 @@ static void build_machine_list(char names[][MAX_FILENAME_LENGTH], int *ports, in
 
     for (i = 0; i < count; i++)
     {
-        if (i > 0)
-            strncat(output, ",", output_len - strlen(output) - 1);
-        strncat(output, names[i], output_len - strlen(output) - 1);
+        append_machine_to_list(output, output_len, names[i]);
     }
 }
 
@@ -279,14 +409,86 @@ static void discard_stream_bytes(char *buffer, int *length, int count)
     memset(buffer + *length + 1, 0, DISCOVERY_PACKET_SIZE - *length - 1);
 }
 
-static void build_iam_frame(const char *computername, char *packet)
+static unsigned int discovery_checksum(const char *body)
 {
-    sprintf(packet, "<<<IAM::%s>>>\r\n", computername);
+    unsigned int sum = 0;
+    int i;
+
+    for (i = 0; body[i] != '\0'; i++)
+        sum = (unsigned int)((sum + (unsigned char)body[i]) & 0xFFFF);
+
+    return sum;
 }
 
-static void build_know_frame(const char *computername, const char *knownname, char *packet)
+static int strip_and_validate_discovery_checksum(char *frame)
 {
-    sprintf(packet, "<<<KNOW::%s::%s>>>\r\n", computername, knownname);
+    char *marker;
+    unsigned int expected;
+    unsigned int actual;
+
+    marker = strstr(frame, DISCOVERY_CHECKSUM_MARKER);
+    if (marker == NULL)
+    {
+        println("DROP no checksum [%s]", frame);
+        return FALSE;
+    }
+
+    expected = (unsigned int)strtoul(marker + strlen(DISCOVERY_CHECKSUM_MARKER), NULL, 16);
+    *marker = '\0';
+    actual = discovery_checksum(frame);
+
+    if (actual != expected)
+    {
+        println("DROP bad checksum [%s]", frame);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void build_discovery_packet(const char *body, char *packet)
+{
+    sprintf(packet,
+            "<<<%s%s%04X>>>\r\n",
+            body,
+            DISCOVERY_CHECKSUM_MARKER,
+            discovery_checksum(body));
+}
+
+static void build_iam_frame(const char *computername, char *packet)
+{
+    char body[DISCOVERY_PACKET_SIZE];
+
+    sprintf(body, "IAM::%s", computername);
+    build_discovery_packet(body, packet);
+}
+
+static void build_know_frame(const char *computername, const char *knownlist, char *packet)
+{
+    char body[DISCOVERY_PACKET_SIZE];
+
+    sprintf(body, "KNOW::%s::%s", computername, knownlist);
+    build_discovery_packet(body, packet);
+}
+
+static void build_advertised_machine_list(char names[][MAX_FILENAME_LENGTH],
+                                          int *ports,
+                                          int count,
+                                          int outbound_port,
+                                          char *output,
+                                          int output_len)
+{
+    int i;
+
+    sort_routes(names, ports, count);
+    output[0] = '\0';
+
+    for (i = 0; i < count; i++)
+    {
+        if (ports[i] == outbound_port)
+            continue;
+        append_machine_to_list(output, output_len, names[i]);
+    }
 }
 
 static int read_discovery_frame(char *buffer, int *length, char *frame, int frame_len)
@@ -363,6 +565,11 @@ static int read_discovery_frame(char *buffer, int *length, char *frame, int fram
         strncpy(frame, buffer + begin_len, body_len);
         frame[body_len] = '\0';
         discard_stream_bytes(buffer, length, end + end_len);
+        if (strip_and_validate_discovery_checksum(frame) == FALSE)
+        {
+            frame[0] = '\0';
+            continue;
+        }
         return TRUE;
     }
 
@@ -450,6 +657,7 @@ static int handle_discovery_frame(char *frame,
     char *verb;
     char *from;
     char *known;
+    char *token;
     int changed = FALSE;
 
     strncpy(framecopy, frame, sizeof(framecopy) - 1);
@@ -499,13 +707,20 @@ static int handle_discovery_frame(char *frame,
         {
             trim_token(known);
             to_upper_case(known);
-            if (known[0] != '\0' && strcmp(known, computername) != 0)
+            token = strtok(known, ",");
+            while (token != NULL)
             {
-                if (add_or_update_route(names, ports, count, known, port) == TRUE)
+                trim_token(token);
+                to_upper_case(token);
+                if (token[0] != '\0' && strcmp(token, computername) != 0)
                 {
-                    changed = TRUE;
-                    println("Heard %-12s on COM%d", known, port);
+                    if (add_or_update_route(names, ports, count, token, port) == TRUE)
+                    {
+                        changed = TRUE;
+                        println("Heard %-12s on COM%d", token, port);
+                    }
                 }
+                token = strtok(NULL, ",");
             }
         }
     }
@@ -719,6 +934,25 @@ void SerialManager::flush_receive(unsigned int base)
         read_byte(base);
         guard++;
     }
+}
+
+void SerialManager::shutdown_port(unsigned int base)
+{
+    int guard = 0;
+
+    if (base == 0)
+        return;
+
+    while (transmit_ready(base) == FALSE && guard < 1000)
+    {
+        delay(1);
+        guard++;
+    }
+
+    outportb(base + UART_IER, 0x00);
+    outportb(base + UART_FCR, 0x00);
+    outportb(base + UART_MCR, 0x00);
+    flush_receive(base);
 }
 
 unsigned char SerialManager::read_byte(unsigned int base)
@@ -1012,6 +1246,11 @@ void SerialManager::show_diagnostics(void)
     int mouse_major = 0;
     int mouse_minor = 0;
     int inferred_com = 0;
+    int mouse_com_uncertain = FALSE;
+    int found_ports[4];
+    int found_count = 0;
+    char ports_value[32] = {"\0"};
+    char key;
 
     clrscr();
     println("ZMGR Serial Port Diagnostics");
@@ -1033,6 +1272,11 @@ void SerialManager::show_diagnostics(void)
         }
         else
         {
+            if (found_count < 4)
+            {
+                found_ports[found_count] = i;
+                found_count++;
+            }
             println("COM%d IRQ%d base %04Xh UART %-12s max baud 115200",
                     i,
                     standard_irq,
@@ -1062,29 +1306,75 @@ void SerialManager::show_diagnostics(void)
             {
                 println("Likely mouse port: COM1 or COM3");
                 println("IRQ4 is shared by COM1 and COM3");
+                mouse_com_uncertain = TRUE;
                 show_msd_fallback();
             }
             else if (mouse_irq == 3)
             {
                 println("Likely mouse port: COM2 or COM4");
                 println("IRQ3 is shared by COM2 and COM4");
+                mouse_com_uncertain = TRUE;
                 show_msd_fallback();
             }
             else
             {
                 println("Mouse serial port: not inferred from IRQ");
+                mouse_com_uncertain = TRUE;
                 show_msd_fallback();
             }
         }
         else
         {
             println("Mouse type/IRQ query was not supported");
+            mouse_com_uncertain = TRUE;
             show_msd_fallback();
         }
     }
     else
     {
         println("Mouse driver: not detected");
+    }
+
+    for (i = 0; i < found_count; i++)
+    {
+        if (inferred_com > 0 && found_ports[i] == inferred_com)
+            continue;
+        append_port_to_list(ports_value, sizeof(ports_value), found_ports[i]);
+    }
+
+    println("");
+    if (mouse_com_uncertain == TRUE)
+    {
+        println("Mouse COM not certain; PORTS not updated");
+    }
+    else if (ports_value[0] != '\0')
+    {
+        if (inferred_com > 0)
+            println("Non-mouse COM ports found: %s", ports_value);
+        else
+            println("No mouse COM detected; found COM ports: %s", ports_value);
+
+        println("Update %s PORTS = %s? Y/N", CONFIG_FILE, ports_value);
+        key = getch();
+        if (key == 'y' || key == 'Y')
+        {
+            if (update_config_ports_local(ports_value) == TRUE)
+                println("Updated %s and wrote %s", CONFIG_FILE, CONFIG_BACKUP_FILE);
+            else
+                println("Could not update %s", CONFIG_FILE);
+        }
+        else
+        {
+            println("Configuration unchanged");
+        }
+    }
+    else if (found_count > 0 && inferred_com > 0)
+    {
+        println("Only detected COM port is likely the mouse port; PORTS not updated");
+    }
+    else
+    {
+        println("No COM ports found for PORTS update");
     }
 
     println("");
@@ -1105,6 +1395,8 @@ void SerialManager::run_who_is_there(void)
     int cycle;
     int p;
     int converged = FALSE;
+    int stop_requested = FALSE;
+    int output_lines = 0;
     int discovery_baud = get_discovery_baud_local();
     int discovery_slot;
 
@@ -1147,9 +1439,9 @@ void SerialManager::run_who_is_there(void)
     println("Sending discovery packets. Press X to stop.");
     println("");
 
-    for (cycle = 0; cycle < DISCOVERY_CYCLES && converged == FALSE; cycle++)
+    for (cycle = 0; stop_requested == FALSE && converged == FALSE; cycle++)
     {
-        for (p = 0; p < DISCOVERY_SLOT_COUNT; p++)
+        for (p = 0; p < DISCOVERY_SLOT_COUNT && stop_requested == FALSE; p++)
         {
             int port_index;
             int listen_tick;
@@ -1157,7 +1449,7 @@ void SerialManager::run_who_is_there(void)
             {
                 char key = getch();
                 if (key == 'x' || key == 'X')
-                    cycle = DISCOVERY_CYCLES;
+                    stop_requested = TRUE;
             }
 
             if (p == discovery_slot)
@@ -1166,8 +1458,7 @@ void SerialManager::run_who_is_there(void)
                 {
                     unsigned int base = get_com_base(ports[port_index]);
                     char packet[DISCOVERY_PACKET_SIZE];
-                    int route_index;
-                    int know_index;
+                    char knownlist[DISCOVERY_KNOWN_LIST_SIZE];
 
                     if (base == 0 || uart_present(base) == FALSE)
                         continue;
@@ -1192,37 +1483,43 @@ void SerialManager::run_who_is_there(void)
 
                     if (route_count > 0)
                     {
-                        know_index = cycle % route_count;
-                        for (route_index = 0; route_index < route_count; route_index++)
+                        memset(packet, 0, sizeof(packet));
+                        memset(knownlist, 0, sizeof(knownlist));
+                        build_advertised_machine_list(route_names,
+                                                      route_ports,
+                                                      route_count,
+                                                      ports[port_index],
+                                                      knownlist,
+                                                      sizeof(knownlist));
+                        build_know_frame(computername, knownlist, packet);
                         {
-                            int index = (know_index + route_index) % route_count;
-                            if (route_names[index][0] == '\0')
-                                continue;
-                            memset(packet, 0, sizeof(packet));
-                            build_know_frame(computername, route_names[index], packet);
+                            char *outptr = packet;
+                            while (*outptr != '\0')
                             {
-                                char *outptr = packet;
-                                while (*outptr != '\0')
+                                int waitcount = 0;
+                                while (transmit_ready(base) == FALSE && waitcount < 1000)
                                 {
-                                    int waitcount = 0;
-                                    while (transmit_ready(base) == FALSE && waitcount < 1000)
-                                    {
-                                        delay(1);
-                                        waitcount++;
-                                    }
-                                    if (transmit_ready(base) == TRUE)
-                                        write_byte(base, (unsigned char)*outptr);
-                                    outptr++;
+                                    delay(1);
+                                    waitcount++;
                                 }
+                                if (transmit_ready(base) == TRUE)
+                                    write_byte(base, (unsigned char)*outptr);
+                                outptr++;
                             }
-                            break;
                         }
                     }
                 }
             }
 
-            for (listen_tick = 0; listen_tick < DISCOVERY_SLOT_TICKS; listen_tick++)
+            for (listen_tick = 0; listen_tick < DISCOVERY_SLOT_TICKS && stop_requested == FALSE; listen_tick++)
             {
+                if (kbhit())
+                {
+                    char key = getch();
+                    if (key == 'x' || key == 'X')
+                        stop_requested = TRUE;
+                }
+
                 for (port_index = 0; port_index < port_count; port_index++)
                 {
                     unsigned int base = get_com_base(ports[port_index]);
@@ -1241,7 +1538,6 @@ void SerialManager::run_who_is_there(void)
                             length++;
                             receive_buffers[port_index][length] = '\0';
                             receive_lengths[port_index] = length;
-                            print_discovery_rx_debug(ports[port_index], value, receive_buffers[port_index], receive_lengths[port_index]);
                         }
                         else
                         {
@@ -1258,15 +1554,19 @@ void SerialManager::run_who_is_there(void)
                                                         frame,
                                                         sizeof(frame)) == TRUE)
                             {
-                                println("FRAME COM%d [%s]", ports[port_index], frame);
-                                handle_discovery_frame(frame,
-                                                       route_names,
-                                                       route_ports,
-                                                       &route_count,
-                                                       computername,
-                                                       ports[port_index]);
+                                if (handle_discovery_frame(frame,
+                                                           route_names,
+                                                           route_ports,
+                                                           &route_count,
+                                                           computername,
+                                                           ports[port_index]) == TRUE)
+                                    output_lines++;
+                                if (output_lines >= DISCOVERY_REMINDER_LINES)
+                                {
+                                    println("Press X to stop discovery");
+                                    output_lines = 0;
+                                }
                             }
-                            print_discovery_buffer_debug("POST", ports[port_index], receive_buffers[port_index], receive_lengths[port_index]);
                         }
                     }
                 }
@@ -1274,6 +1574,9 @@ void SerialManager::run_who_is_there(void)
             }
         }
     }
+
+    for (p = 0; p < port_count; p++)
+        shutdown_port(get_com_base(ports[p]));
 
     sort_routes(route_names, route_ports, route_count);
     println("");

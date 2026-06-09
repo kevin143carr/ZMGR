@@ -31,14 +31,84 @@ int UploadManager::processForwardFiles(char *fullfilename)
     return SUCCESS;
 }
 
+int UploadManager::processMultiForwardFile(char *fullfilename, char *payloadfile, char *multifile)
+{
+    FILE *infile;
+    FILE *sendlist;
+    char recipients[MAX_FILE_SIZE] = {"\0"};
+    char payload[MAX_FILE_SIZE] = {"\0"};
+    char sendlistname[MAX_FILE_SIZE] = {"\0"};
+
+    sprintf(multifile, "%s\\MULTI.FIL", config->getconfigvalue(UPLOADFOLDER));
+    infile = fopen(multifile, "r");
+    if (infile == NULL)
+    {
+        println("Could not open MULTI.FIL");
+        return ERROR;
+    }
+
+    if (fgets(recipients, sizeof(recipients), infile) == NULL ||
+        fgets(payload, sizeof(payload), infile) == NULL)
+    {
+        fclose(infile);
+        println("MULTI.FIL is incomplete");
+        return ERROR;
+    }
+    fclose(infile);
+
+    remove_char(payload, '\n');
+    remove_char(payload, '\r');
+    strcpy(payloadfile, payload);
+
+    if (fileexists(payloadfile) == ERROR)
+    {
+        println("MULTI payload missing: %s", payloadfile);
+        return ERROR;
+    }
+
+    sprintf(sendlistname, "%s\\ZMSEND.LST", config->getconfigvalue(UPLOADFOLDER));
+    sendlist = fopen(sendlistname, "w");
+    if (sendlist == NULL)
+    {
+        println("Could not create %s", sendlistname);
+        return ERROR;
+    }
+
+    fprintf(sendlist, "%s\n", payloadfile);
+    fprintf(sendlist, "%s\n", multifile);
+    fclose(sendlist);
+
+    strcpy(fullfilename, sendlistname);
+    return SUCCESS;
+}
+
 int UploadManager::beginuploads(int port)
 {
     int returnval = TRUE;
     char uploadfolder[MAX_FILE_SIZE] = {"\0"};
     char forwardfilename[MAX_FILE_SIZE] = {"\0"};
+    char payloadfile[MAX_FILE_SIZE] = {"\0"};
+    char multifile[MAX_FILE_SIZE] = {"\0"};
     strcpy(uploadfolder, config->getconfigvalue(UPLOADFOLDER));
+    sprintf(multifile, "%s\\MULTI.FIL", uploadfolder);
 
-    if (forwardmanager->checkforforwardfiles(uploadfolder) == TRUE)
+    if (fileexists(multifile) != ERROR)
+    {
+        if (processMultiForwardFile(forwardfilename, payloadfile, multifile) == SUCCESS)
+        {
+            returnval = tranfer->upload_operations(forwardfilename, port);
+
+            if (returnval == SUCCESS)
+            {
+                remove(payloadfile);
+                remove(multifile);
+                remove(forwardfilename);
+            }
+        }
+        else
+            returnval = ERROR;
+    }
+    else if (forwardmanager->checkforforwardfiles(uploadfolder) == TRUE)
     {
         if (processForwardFiles(forwardfilename) == SUCCESS)
         {

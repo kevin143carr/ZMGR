@@ -17,6 +17,7 @@ public:
     void setupconfig(ConfigClass *config);
     int checkforuploads();
     int processForwardFiles(char *fullfilename);
+    int processMultiForwardFile(char *fullfilename, char *payloadfile, char *multifile);
     int beginuploads(int port);
 };
 
