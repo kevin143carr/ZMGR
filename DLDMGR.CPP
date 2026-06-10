@@ -9,7 +9,115 @@ DownloadManager::DownloadManager()
 
 int DownloadManager::checkforforwardfiles(char *sourcefolder)
 {
+    if (count_files_of_type(sourcefolder, "XFL") > 0)
+        return TRUE;
+    if (count_files_of_type(sourcefolder, "RDY") > 0)
+        return TRUE;
     return forwardmanager->checkforforwardfiles(sourcefolder);
+}
+
+static void trim_value(char *value)
+{
+    while (value[0] == ' ')
+        memmove(value, value + 1, strlen(value));
+    while (strlen(value) > 0 && value[strlen(value) - 1] == ' ')
+        value[strlen(value) - 1] = '\0';
+    remove_char(value, '\n');
+    remove_char(value, '\r');
+}
+
+static int first_file_of_type(char *folder, char *extension, char *fullpath)
+{
+    int filecount;
+    int allocated_count;
+    char **filearray;
+    MemoryManager *memmgr;
+
+    filecount = count_files_of_type(folder, extension);
+    if (filecount <= 0)
+        return FALSE;
+
+    allocated_count = filecount;
+    memmgr = new MemoryManager();
+    filearray = memmgr->allocate_string_array(allocated_count, MAX_FILE_SIZE);
+    filecount = list_files_of_type(folder, extension, filearray, allocated_count, MAX_FILE_SIZE);
+    if (filecount <= 0)
+    {
+        memmgr->free_string_array(filearray, allocated_count);
+        delete (memmgr);
+        return FALSE;
+    }
+
+    sprintf(fullpath, "%s\\%s", folder, filearray[0]);
+    to_upper_case(fullpath);
+    memmgr->free_string_array(filearray, allocated_count);
+    delete (memmgr);
+    return TRUE;
+}
+
+static int read_express_file(char *filename, char *source, char *target, char *payload)
+{
+    FILE *file;
+    char line[MAX_FILE_SIZE] = {"\0"};
+
+    source[0] = '\0';
+    target[0] = '\0';
+    payload[0] = '\0';
+
+    file = fopen(filename, "r");
+    if (file == NULL)
+        return ERROR;
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *equal = strchr(line, '=');
+        char key[MAX_FILENAME_LENGTH] = {"\0"};
+        char value[MAX_FILE_SIZE] = {"\0"};
+
+        if (equal == NULL)
+            continue;
+
+        *equal = '\0';
+        strcpy(key, line);
+        strcpy(value, equal + 1);
+        trim_value(key);
+        trim_value(value);
+        to_upper_case(key);
+
+        if (strcmp(key, "SOURCE") == 0)
+        {
+            strcpy(source, value);
+            to_upper_case(source);
+        }
+        else if (strcmp(key, "TARGET") == 0)
+        {
+            strcpy(target, value);
+            to_upper_case(target);
+        }
+        else if (strcmp(key, "PAYLOAD") == 0)
+            strcpy(payload, value);
+    }
+
+    fclose(file);
+    if (source[0] == '\0' || target[0] == '\0' || payload[0] == '\0')
+        return ERROR;
+
+    return TRUE;
+}
+
+static int write_express_file(char *filename, char *source, char *target, char *payload)
+{
+    FILE *file;
+
+    file = fopen(filename, "w");
+    if (file == NULL)
+        return ERROR;
+
+    fprintf(file, "SOURCE=%s\n", source);
+    fprintf(file, "TARGET=%s\n", target);
+    fprintf(file, "PAYLOAD=%s\n", payload);
+    fclose(file);
+    return TRUE;
 }
 
 static int name_in_multi_list(char *list, const char *computername)
@@ -161,6 +269,97 @@ int DownloadManager::processmultifile()
     return TRUE;
 }
 
+int DownloadManager::processxflfile()
+{
+    char xflfile[MAX_FILE_SIZE] = {"\0"};
+    char uploadfile[MAX_FILE_SIZE] = {"\0"};
+    char readyfile[MAX_FILE_SIZE] = {"\0"};
+    char source[MAX_FILENAME_LENGTH] = {"\0"};
+    char target[MAX_FILENAME_LENGTH] = {"\0"};
+    char payload[MAX_FILE_SIZE] = {"\0"};
+    char computername[MAX_FILENAME_LENGTH] = {"\0"};
+
+    if (first_file_of_type(config->getconfigvalue(DOWNLOADFOLDER), "XFL", xflfile) == FALSE)
+        return FALSE;
+
+    if (read_express_file(xflfile, source, target, payload) == ERROR)
+    {
+        println("Express file is incomplete: %s", xflfile);
+        remove(xflfile);
+        return ERROR;
+    }
+
+    strcpy(computername, config->getconfigvalue(COMPUTERNAME));
+    to_upper_case(computername);
+
+    if (strcmp(target, computername) == 0)
+    {
+        sprintf(readyfile, "%s\\%s.RDY", config->getconfigvalue(UPLOADFOLDER), source);
+        to_upper_case(readyfile);
+        if (write_express_file(readyfile, source, target, payload) == ERROR)
+            return ERROR;
+        remove(xflfile);
+        println("Express handshake reached %s", computername);
+        return TRUE;
+    }
+
+    sprintf(uploadfile, "%s\\%s.XFL", config->getconfigvalue(UPLOADFOLDER), target);
+    to_upper_case(uploadfile);
+    if (movefile(xflfile, uploadfile) == ERROR)
+        return ERROR;
+
+    println("Express setup forwarded toward %s", target);
+    return TRUE;
+}
+
+int DownloadManager::processrdyfile()
+{
+    char rdyfile[MAX_FILE_SIZE] = {"\0"};
+    char uploadfile[MAX_FILE_SIZE] = {"\0"};
+    char source[MAX_FILENAME_LENGTH] = {"\0"};
+    char target[MAX_FILENAME_LENGTH] = {"\0"};
+    char payload[MAX_FILE_SIZE] = {"\0"};
+    char computername[MAX_FILENAME_LENGTH] = {"\0"};
+    FILE *forwardfile;
+
+    if (first_file_of_type(config->getconfigvalue(DOWNLOADFOLDER), "RDY", rdyfile) == FALSE)
+        return FALSE;
+
+    if (read_express_file(rdyfile, source, target, payload) == ERROR)
+    {
+        println("Ready file is incomplete: %s", rdyfile);
+        remove(rdyfile);
+        return ERROR;
+    }
+
+    strcpy(computername, config->getconfigvalue(COMPUTERNAME));
+    to_upper_case(computername);
+
+    if (strcmp(source, computername) == 0)
+    {
+        sprintf(uploadfile, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), target);
+        to_upper_case(uploadfile);
+        forwardfile = fopen(uploadfile, "w");
+        if (forwardfile == NULL)
+            return ERROR;
+
+        fprintf(forwardfile, "%s\n", payload);
+        fprintf(forwardfile, "%s\n", uploadfile);
+        fclose(forwardfile);
+        remove(rdyfile);
+        println("Express payload staged for %s", target);
+        return TRUE;
+    }
+
+    sprintf(uploadfile, "%s\\%s.RDY", config->getconfigvalue(UPLOADFOLDER), source);
+    to_upper_case(uploadfile);
+    if (movefile(rdyfile, uploadfile) == ERROR)
+        return ERROR;
+
+    println("Express ready forwarded toward %s", source);
+    return TRUE;
+}
+
 int DownloadManager::processforwardfiles()
 {
     int returnval = TRUE;
@@ -175,6 +374,12 @@ int DownloadManager::processforwardfiles()
 
     if (fileexists(forwardfilename) != ERROR)
         return processmultifile();
+
+    if (count_files_of_type(downloadfolder, "XFL") > 0)
+        return processxflfile();
+
+    if (count_files_of_type(downloadfolder, "RDY") > 0)
+        return processrdyfile();
 
     sprintf(forwardfilename, "%s\\%s", config->getconfigvalue(DOWNLOADFOLDER), forwardmanager->getforwardfilename());
 

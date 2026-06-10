@@ -1,10 +1,61 @@
 #include "UPLDMGR.H"
 
+static int is_internal_upload_file(char *filename)
+{
+    char uppername[MAX_FILENAME_LENGTH] = {"\0"};
+
+    strcpy(uppername, filename);
+    to_upper_case(uppername);
+
+    if (strcmp(uppername, "ZMSEND.LST") == 0)
+        return TRUE;
+
+    return FALSE;
+}
+
+static void remove_upload_owned_file(char *uploadfolder, char *filename)
+{
+    char candidate[MAX_FILE_SIZE] = {"\0"};
+    char candidateupper[MAX_FILE_SIZE] = {"\0"};
+    char entryupper[MAX_FILE_SIZE] = {"\0"};
+
+    sprintf(candidate, "%s\\%s", uploadfolder, getshortfilename(filename));
+    strcpy(candidateupper, candidate);
+    strcpy(entryupper, filename);
+    to_upper_case(candidateupper);
+    to_upper_case(entryupper);
+
+    if (strchr(filename, '\\') == NULL || strcmp(candidateupper, entryupper) == 0)
+        remove(candidate);
+}
+
 int UploadManager::checkforuploads()
 {
-    int returnval = TRUE;
-    returnval = filesexists_in_dir(config->getconfigvalue(UPLOADFOLDER), "*.*");
-    return returnval;
+    char uploadfolder[MAX_FILE_SIZE] = {"\0"};
+    int filecount;
+    int allocated_count;
+    int uploadcount = 0;
+    char **filearray;
+    MemoryManager *memmgr;
+
+    strcpy(uploadfolder, config->getconfigvalue(UPLOADFOLDER));
+    filecount = count_files_of_type(uploadfolder, "*");
+    if (filecount <= 0)
+        return FALSE;
+
+    allocated_count = filecount;
+    memmgr = new MemoryManager();
+    filearray = memmgr->allocate_string_array(allocated_count, MAX_FILE_SIZE);
+    filecount = list_files_of_type(uploadfolder, "*", filearray, allocated_count, MAX_FILE_SIZE);
+    for (int i = 0; i < filecount; i++)
+    {
+        if (is_internal_upload_file(filearray[i]) == FALSE)
+            uploadcount++;
+    }
+
+    memmgr->free_string_array(filearray, allocated_count);
+    delete (memmgr);
+    return uploadcount;
 }
 
 /***
@@ -82,6 +133,49 @@ int UploadManager::processMultiForwardFile(char *fullfilename, char *payloadfile
     return SUCCESS;
 }
 
+int UploadManager::processControlFile(char *fullfilename, char *controlfile, char *extension)
+{
+    FILE *sendlist;
+    char uploadfolder[MAX_FILE_SIZE] = {"\0"};
+    int filecount;
+    int allocated_count;
+    char **filearray;
+    MemoryManager *memmgr;
+
+    strcpy(uploadfolder, config->getconfigvalue(UPLOADFOLDER));
+    filecount = count_files_of_type(uploadfolder, extension);
+    if (filecount <= 0)
+        return ABORT;
+
+    allocated_count = filecount;
+    memmgr = new MemoryManager();
+    filearray = memmgr->allocate_string_array(allocated_count, MAX_FILE_SIZE);
+    filecount = list_files_of_type(uploadfolder, extension, filearray, allocated_count, MAX_FILE_SIZE);
+    if (filecount <= 0)
+    {
+        memmgr->free_string_array(filearray, allocated_count);
+        delete (memmgr);
+        return ABORT;
+    }
+
+    sprintf(controlfile, "%s\\%s", uploadfolder, filearray[0]);
+    to_upper_case(controlfile);
+    memmgr->free_string_array(filearray, allocated_count);
+    delete (memmgr);
+
+    sprintf(fullfilename, "%s\\ZMSEND.LST", uploadfolder);
+    sendlist = fopen(fullfilename, "w");
+    if (sendlist == NULL)
+    {
+        println("Could not create %s", fullfilename);
+        return ERROR;
+    }
+
+    fprintf(sendlist, "%s\n", controlfile);
+    fclose(sendlist);
+    return SUCCESS;
+}
+
 int UploadManager::beginuploads(int port)
 {
     int returnval = TRUE;
@@ -89,6 +183,7 @@ int UploadManager::beginuploads(int port)
     char forwardfilename[MAX_FILE_SIZE] = {"\0"};
     char payloadfile[MAX_FILE_SIZE] = {"\0"};
     char multifile[MAX_FILE_SIZE] = {"\0"};
+    char controlfile[MAX_FILE_SIZE] = {"\0"};
     strcpy(uploadfolder, config->getconfigvalue(UPLOADFOLDER));
     sprintf(multifile, "%s\\MULTI.FIL", uploadfolder);
 
@@ -100,13 +195,29 @@ int UploadManager::beginuploads(int port)
 
             if (returnval == SUCCESS)
             {
-                remove(payloadfile);
+                remove_upload_owned_file(uploadfolder, payloadfile);
                 remove(multifile);
                 remove(forwardfilename);
             }
         }
         else
             returnval = ERROR;
+    }
+    else if (processControlFile(forwardfilename, controlfile, "XFL") == SUCCESS)
+    {
+        returnval = tranfer->upload_operations(forwardfilename, port);
+
+        remove(forwardfilename);
+        if (returnval == SUCCESS)
+            remove(controlfile);
+    }
+    else if (processControlFile(forwardfilename, controlfile, "RDY") == SUCCESS)
+    {
+        returnval = tranfer->upload_operations(forwardfilename, port);
+
+        remove(forwardfilename);
+        if (returnval == SUCCESS)
+            remove(controlfile);
     }
     else if (forwardmanager->checkforforwardfiles(uploadfolder) == TRUE)
     {

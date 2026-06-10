@@ -13,6 +13,8 @@ private:
     ForwardManager* forwardmanager;
 	Transfer *tranfer;
     int processmultifile();
+    int processxflfile();
+    int processrdyfile();
 
 public:
     DownloadManager();

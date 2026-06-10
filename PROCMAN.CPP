@@ -175,11 +175,90 @@ int ProcessManager::get_route_port_for_machine(char *machine)
 	return 0;
 }
 
+static void trim_process_value(char *value)
+{
+	while (value[0] == ' ')
+		memmove(value, value + 1, strlen(value));
+	while (strlen(value) > 0 && value[strlen(value) - 1] == ' ')
+		value[strlen(value) - 1] = '\0';
+	remove_char(value, '\n');
+	remove_char(value, '\r');
+}
+
+static int first_process_file_of_type(char *folder, char *extension, char *fullpath)
+{
+	int filecount;
+	int allocated_count;
+	char **filearray;
+	MemoryManager *memmgr;
+
+	filecount = count_files_of_type(folder, extension);
+	if (filecount <= 0)
+		return FALSE;
+
+	allocated_count = filecount;
+	memmgr = new MemoryManager();
+	filearray = memmgr->allocate_string_array(allocated_count, MAX_FILE_SIZE);
+	filecount = list_files_of_type(folder, extension, filearray, allocated_count, MAX_FILE_SIZE);
+	if (filecount <= 0)
+	{
+		memmgr->free_string_array(filearray, allocated_count);
+		delete (memmgr);
+		return FALSE;
+	}
+
+	sprintf(fullpath, "%s\\%s", folder, filearray[0]);
+	to_upper_case(fullpath);
+	memmgr->free_string_array(filearray, allocated_count);
+	delete (memmgr);
+	return TRUE;
+}
+
+static int read_express_route_name(char *filename, char *keyname, char *machine)
+{
+	FILE *file;
+	char line[MAX_FILE_SIZE] = {"\0"};
+
+	machine[0] = '\0';
+	file = fopen(filename, "r");
+	if (file == NULL)
+		return ERROR;
+
+	while (fgets(line, sizeof(line), file) != NULL)
+	{
+		char *equal = strchr(line, '=');
+		char key[MAX_FILENAME_LENGTH] = {"\0"};
+		char value[MAX_FILE_SIZE] = {"\0"};
+
+		if (equal == NULL)
+			continue;
+
+		*equal = '\0';
+		strcpy(key, line);
+		strcpy(value, equal + 1);
+		trim_process_value(key);
+		trim_process_value(value);
+		to_upper_case(key);
+
+		if (strcmp(key, keyname) == 0)
+		{
+			strcpy(machine, value);
+			to_upper_case(machine);
+			fclose(file);
+			return TRUE;
+		}
+	}
+
+	fclose(file);
+	return ERROR;
+}
+
 int ProcessManager::get_routed_upload_port(void)
 {
 	char uploadfolder[MAX_CONFIG_SIZE] = {"\0"};
 	char machine[MAX_FILENAME_LENGTH] = {"\0"};
 	char multifile[MAX_FILE_SIZE] = {"\0"};
+	char controlfile[MAX_FILE_SIZE] = {"\0"};
 	char recipients[MAX_FILE_SIZE] = {"\0"};
 	int filecount;
 	int allocated_count;
@@ -212,6 +291,28 @@ int ProcessManager::get_routed_upload_port(void)
 					println("Route %s via COM%d", recipients, routed_port);
 			}
 			fclose(file);
+		}
+		return routed_port;
+	}
+
+	if (first_process_file_of_type(uploadfolder, "XFL", controlfile) == TRUE)
+	{
+		if (read_express_route_name(controlfile, "TARGET", machine) == TRUE)
+		{
+			routed_port = get_route_port_for_machine(machine);
+			if (routed_port > 0)
+				println("Route %s via COM%d", machine, routed_port);
+		}
+		return routed_port;
+	}
+
+	if (first_process_file_of_type(uploadfolder, "RDY", controlfile) == TRUE)
+	{
+		if (read_express_route_name(controlfile, "SOURCE", machine) == TRUE)
+		{
+			routed_port = get_route_port_for_machine(machine);
+			if (routed_port > 0)
+				println("Route %s via COM%d", machine, routed_port);
 		}
 		return routed_port;
 	}
@@ -412,12 +513,15 @@ void ProcessManager::execute_file_transfer_loop(void)
 void ProcessManager::create_forward_file_wizard(void)
 {
 	char computername[MAX_FILENAME_LENGTH] = {"\0"};
+	char sourcecomputer[MAX_FILENAME_LENGTH] = {"\0"};
 	char filepath[MAX_FILE_SIZE] = {"\0"};
 	char forwardfilename[MAX_FILE_SIZE] = {"\0"};
+	int is_multi = FALSE;
+	int use_express = FALSE;
 	FILE *forwardfile;
 
 	clrscr();
-	draw_process_border(6, 4, 68, 14);
+	draw_process_border(6, 4, 68, 16);
 	gotoxy(31, 5);
 	cprintf("Forward File");
 	draw_process_separator(6, 6, 68);
@@ -458,8 +562,26 @@ void ProcessManager::create_forward_file_wizard(void)
 		return;
 	}
 
-	if (strchr(computername, ',') != NULL)
+	is_multi = strchr(computername, ',') != NULL;
+	if (is_multi == FALSE)
+	{
+		char answer;
+		gotoxy(10, 12);
+		cprintf("Express handshake? (Y/N):");
+		answer = getch();
+		if (answer == 'y' || answer == 'Y')
+			use_express = TRUE;
+		gotoxy(35, 12);
+		if (use_express == TRUE)
+			cprintf("Y");
+		else
+			cprintf("N");
+	}
+
+	if (is_multi == TRUE)
 		sprintf(forwardfilename, "%s\\MULTI.FIL", config->getconfigvalue(UPLOADFOLDER));
+	else if (use_express == TRUE)
+		sprintf(forwardfilename, "%s\\%s.XFL", config->getconfigvalue(UPLOADFOLDER), computername);
 	else
 		sprintf(forwardfilename, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), computername);
 	to_upper_case(forwardfilename);
@@ -477,10 +599,18 @@ void ProcessManager::create_forward_file_wizard(void)
 		return;
 	}
 
-	if (strchr(computername, ',') != NULL)
+	if (is_multi == TRUE)
 	{
 		fprintf(forwardfile, "%s\n", computername);
 		fprintf(forwardfile, "%s\n", filepath);
+	}
+	else if (use_express == TRUE)
+	{
+		strcpy(sourcecomputer, config->getconfigvalue(COMPUTERNAME));
+		to_upper_case(sourcecomputer);
+		fprintf(forwardfile, "SOURCE=%s\n", sourcecomputer);
+		fprintf(forwardfile, "TARGET=%s\n", computername);
+		fprintf(forwardfile, "PAYLOAD=%s\n", filepath);
 	}
 	else
 	{
@@ -489,11 +619,11 @@ void ProcessManager::create_forward_file_wizard(void)
 	}
 	fclose(forwardfile);
 
-	gotoxy(10, 13);
-	cprintf("Created forwarding file");
 	gotoxy(10, 14);
-	cprintf("%.58s", forwardfilename);
+	cprintf("Created forwarding file");
 	gotoxy(10, 15);
+	cprintf("%.58s", forwardfilename);
+	gotoxy(10, 17);
 	cprintf("Press any key to continue");
 	getch();
 }

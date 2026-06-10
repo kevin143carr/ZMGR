@@ -18,6 +18,7 @@ public:
     int checkforuploads();
     int processForwardFiles(char *fullfilename);
     int processMultiForwardFile(char *fullfilename, char *payloadfile, char *multifile);
+    int processControlFile(char *fullfilename, char *controlfile, char *extension);
     int beginuploads(int port);
 };
 
