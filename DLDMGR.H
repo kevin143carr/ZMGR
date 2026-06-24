@@ -14,7 +14,6 @@ private:
 	Transfer *tranfer;
     int processmultifile();
     int processxflfile();
-    int processrdyfile();
 
 public:
     DownloadManager();

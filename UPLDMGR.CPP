@@ -29,6 +29,66 @@ static void remove_upload_owned_file(char *uploadfolder, char *filename)
         remove(candidate);
 }
 
+static void trim_express_value(char *value)
+{
+    while (value[0] == ' ')
+        memmove(value, value + 1, strlen(value));
+    while (strlen(value) > 0 && value[strlen(value) - 1] == ' ')
+        value[strlen(value) - 1] = '\0';
+    remove_char(value, '\n');
+    remove_char(value, '\r');
+}
+
+static int read_express_file(char *filename, char *source, char *target, char *payload)
+{
+    FILE *file;
+    char line[MAX_FILE_SIZE] = {"\0"};
+
+    source[0] = '\0';
+    target[0] = '\0';
+    payload[0] = '\0';
+
+    file = fopen(filename, "r");
+    if (file == NULL)
+        return ERROR;
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *equal = strchr(line, '=');
+        char key[MAX_FILENAME_LENGTH] = {"\0"};
+        char value[MAX_FILE_SIZE] = {"\0"};
+
+        if (equal == NULL)
+            continue;
+
+        *equal = '\0';
+        strcpy(key, line);
+        strcpy(value, equal + 1);
+        trim_express_value(key);
+        trim_express_value(value);
+        to_upper_case(key);
+
+        if (strcmp(key, "SOURCE") == 0)
+        {
+            strcpy(source, value);
+            to_upper_case(source);
+        }
+        else if (strcmp(key, "TARGET") == 0)
+        {
+            strcpy(target, value);
+            to_upper_case(target);
+        }
+        else if (strcmp(key, "PAYLOAD") == 0)
+            strcpy(payload, value);
+    }
+
+    fclose(file);
+    if (source[0] == '\0' || target[0] == '\0' || payload[0] == '\0')
+        return ERROR;
+
+    return TRUE;
+}
+
 int UploadManager::checkforuploads()
 {
     char uploadfolder[MAX_FILE_SIZE] = {"\0"};
@@ -176,6 +236,26 @@ int UploadManager::processControlFile(char *fullfilename, char *controlfile, cha
     return SUCCESS;
 }
 
+int UploadManager::stage_express_payload_for_xfl(char *target, char *payload)
+{
+    char uploadfile[MAX_FILE_SIZE] = {"\0"};
+    FILE *forwardfile;
+
+    sprintf(uploadfile, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), target);
+    to_upper_case(uploadfile);
+
+    forwardfile = fopen(uploadfile, "w");
+    if (forwardfile == NULL)
+        return ERROR;
+
+    fprintf(forwardfile, "%s\n", payload);
+    fprintf(forwardfile, "%s\n", uploadfile);
+    fclose(forwardfile);
+
+    println("Express payload staged for %s", target);
+    return SUCCESS;
+}
+
 int UploadManager::beginuploads(int port)
 {
     int returnval = TRUE;
@@ -205,19 +285,44 @@ int UploadManager::beginuploads(int port)
     }
     else if (processControlFile(forwardfilename, controlfile, "XFL") == SUCCESS)
     {
+        char xflsource[MAX_FILENAME_LENGTH] = {"\0"};
+        char xfltarget[MAX_FILENAME_LENGTH] = {"\0"};
+        char xflpayload[MAX_FILE_SIZE] = {"\0"};
+        char computername[MAX_FILENAME_LENGTH] = {"\0"};
+        int xfl_fields_ok;
+
+        xfl_fields_ok = (read_express_file(controlfile, xflsource, xfltarget, xflpayload) != ERROR);
+
+        strcpy(computername, config->getconfigvalue(COMPUTERNAME));
+        to_upper_case(computername);
+
         returnval = tranfer->upload_operations(forwardfilename, port);
 
         remove(forwardfilename);
-        if (returnval == SUCCESS)
+        if (returnval != ERROR)
             remove(controlfile);
-    }
-    else if (processControlFile(forwardfilename, controlfile, "RDY") == SUCCESS)
-    {
-        returnval = tranfer->upload_operations(forwardfilename, port);
 
-        remove(forwardfilename);
-        if (returnval == SUCCESS)
-            remove(controlfile);
+        if (returnval != ERROR && xfl_fields_ok == TRUE && strcmp(xflsource, computername) == 0)
+        {
+            if (stage_express_payload_for_xfl(xfltarget, xflpayload) == SUCCESS &&
+                forwardmanager->checkforforwardfiles(uploadfolder) == TRUE)
+            {
+                if (processForwardFiles(forwardfilename) == SUCCESS)
+                {
+                    int fwdresult = tranfer->upload_operations(forwardfilename, port);
+
+                    if (fwdresult != ERROR)
+                    {
+                        forwardmanager->deleteforwardfilesfromfolder(uploadfolder);
+                        remove(forwardfilename);
+                    }
+                    forwardmanager->clear_arrays();
+                    returnval = fwdresult;
+                }
+                else
+                    forwardmanager->clear_arrays();
+            }
+        }
     }
     else if (forwardmanager->checkforforwardfiles(uploadfolder) == TRUE)
     {

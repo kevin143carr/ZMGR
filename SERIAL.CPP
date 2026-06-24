@@ -420,7 +420,7 @@ static unsigned int discovery_checksum(const char *body)
     return sum;
 }
 
-static int strip_and_validate_discovery_checksum(char *frame)
+static int strip_and_validate_discovery_checksum(char *frame, int port)
 {
     char *marker;
     unsigned int expected;
@@ -429,7 +429,7 @@ static int strip_and_validate_discovery_checksum(char *frame)
     marker = strstr(frame, DISCOVERY_CHECKSUM_MARKER);
     if (marker == NULL)
     {
-        println("DROP no checksum [%s]", frame);
+        println("DROP no checksum on COM%d [%s]", port, frame);
         return FALSE;
     }
 
@@ -439,7 +439,7 @@ static int strip_and_validate_discovery_checksum(char *frame)
 
     if (actual != expected)
     {
-        println("DROP bad checksum [%s]", frame);
+        println("DROP bad checksum on COM%d [%s]", port, frame);
         return FALSE;
     }
 
@@ -491,7 +491,7 @@ static void build_advertised_machine_list(char names[][MAX_FILENAME_LENGTH],
     }
 }
 
-static int read_discovery_frame(char *buffer, int *length, char *frame, int frame_len)
+static int read_discovery_frame(char *buffer, int *length, char *frame, int frame_len, int port)
 {
     int i;
     int j;
@@ -546,7 +546,7 @@ static int read_discovery_frame(char *buffer, int *length, char *frame, int fram
 
         if (restart >= 0 && (end < 0 || restart < end))
         {
-            println("DROP partial frame, resync");
+            println("DROP partial frame, resync on COM%d", port);
             discard_stream_bytes(buffer, length, restart);
             continue;
         }
@@ -557,7 +557,7 @@ static int read_discovery_frame(char *buffer, int *length, char *frame, int fram
         body_len = end - begin_len;
         if (body_len <= 0 || body_len >= frame_len)
         {
-            println("DROP bad frame length %d", body_len);
+            println("DROP bad frame length %d on COM%d", body_len, port);
             discard_stream_bytes(buffer, length, end + end_len);
             continue;
         }
@@ -565,7 +565,7 @@ static int read_discovery_frame(char *buffer, int *length, char *frame, int fram
         strncpy(frame, buffer + begin_len, body_len);
         frame[body_len] = '\0';
         discard_stream_bytes(buffer, length, end + end_len);
-        if (strip_and_validate_discovery_checksum(frame) == FALSE)
+        if (strip_and_validate_discovery_checksum(frame, port) == FALSE)
         {
             frame[0] = '\0';
             continue;
@@ -574,67 +574,6 @@ static int read_discovery_frame(char *buffer, int *length, char *frame, int fram
     }
 
     return FALSE;
-}
-
-static void print_discovery_rx_debug(int port, unsigned char value, char *buffer, int length)
-{
-    char preview[49];
-    int preview_len = 0;
-    int start;
-    int i;
-    char printable;
-
-    start = length - 48;
-    if (start < 0)
-        start = 0;
-
-    for (i = start; i < length && preview_len < (int)sizeof(preview) - 1; i++)
-    {
-        unsigned char ch = (unsigned char)buffer[i];
-        if (ch >= 32 && ch <= 126)
-            preview[preview_len] = (char)ch;
-        else
-            preview[preview_len] = '.';
-        preview_len++;
-    }
-    preview[preview_len] = '\0';
-
-    if (value >= 32 && value <= 126)
-        printable = (char)value;
-    else
-        printable = '.';
-
-    println("RX COM%d len=%03d byte=%02X '%c' buf=[%s]",
-            port,
-            length,
-            (unsigned int)value,
-            printable,
-            preview);
-}
-
-static void print_discovery_buffer_debug(const char *label, int port, char *buffer, int length)
-{
-    char preview[49];
-    int preview_len = 0;
-    int start;
-    int i;
-
-    start = length - 48;
-    if (start < 0)
-        start = 0;
-
-    for (i = start; i < length && preview_len < (int)sizeof(preview) - 1; i++)
-    {
-        unsigned char ch = (unsigned char)buffer[i];
-        if (ch >= 32 && ch <= 126)
-            preview[preview_len] = (char)ch;
-        else
-            preview[preview_len] = '.';
-        preview_len++;
-    }
-    preview[preview_len] = '\0';
-
-    println("%s COM%d len=%03d buf=[%s]", label, port, length, preview);
 }
 
 static int frame_has_expected_shape(char *frame)
@@ -665,7 +604,7 @@ static int handle_discovery_frame(char *frame,
 
     if (frame_has_expected_shape(framecopy) == FALSE)
     {
-        println("DROP frame [%s]", framecopy);
+        println("DROP frame on COM%d [%s]", port, framecopy);
         return FALSE;
     }
 
@@ -726,35 +665,6 @@ static int handle_discovery_frame(char *frame,
     }
 
     return changed;
-}
-
-static int machine_list_matches(char *received_list, char names[][MAX_FILENAME_LENGTH], int *ports, int count)
-{
-    char local_list[DISCOVERY_PACKET_SIZE] = {"\0"};
-    char received_names[MAX_DISCOVERY_MACHINES][MAX_FILENAME_LENGTH];
-    int received_ports[MAX_DISCOVERY_MACHINES];
-    int received_count = 0;
-    char listcopy[DISCOVERY_PACKET_SIZE];
-    char *token;
-    int i;
-
-    memset(received_names, 0, sizeof(received_names));
-    for (i = 0; i < MAX_DISCOVERY_MACHINES; i++)
-        received_ports[i] = 0;
-
-    strncpy(listcopy, received_list, sizeof(listcopy) - 1);
-    listcopy[sizeof(listcopy) - 1] = '\0';
-    token = strtok(listcopy, ",");
-    while (token != NULL)
-    {
-        add_or_update_route(received_names, received_ports, &received_count, token, 1);
-        token = strtok(NULL, ",");
-    }
-
-    build_machine_list(names, ports, count, local_list, sizeof(local_list));
-    build_machine_list(received_names, received_ports, received_count, received_list, DISCOVERY_PACKET_SIZE);
-
-    return (strcmp(local_list, received_list) == 0);
 }
 
 static int write_route_file(char names[][MAX_FILENAME_LENGTH], int *ports, int count)
@@ -851,16 +761,16 @@ int SerialManager::get_standard_irq(int port_number)
     return 0;
 }
 
-int SerialManager::get_recommended_baud(int uart_type)
+long SerialManager::get_recommended_baud(int uart_type)
 {
     if (uart_type == UART_TYPE_16550A)
-        return 115200;
+        return 115200L;
     if (uart_type == UART_TYPE_16550)
-        return 57600;
+        return 57600L;
     if (uart_type == UART_TYPE_16450)
-        return 19200;
+        return 19200L;
     if (uart_type == UART_TYPE_8250)
-        return 9600;
+        return 9600L;
 
     return 0;
 }
@@ -891,105 +801,6 @@ const char *SerialManager::get_baud_note(int uart_type)
         return "old UART, 9600 safer";
 
     return "not detected";
-}
-
-int SerialManager::data_ready(unsigned int base)
-{
-    return ((inportb(base + UART_LSR) & LSR_DATA_READY) != 0);
-}
-
-int SerialManager::transmit_ready(unsigned int base)
-{
-    return ((inportb(base + UART_LSR) & LSR_THR_EMPTY) != 0);
-}
-
-void SerialManager::initialize_port(unsigned int base, int baud)
-{
-    unsigned int divisor;
-
-    if (base == 0)
-        return;
-    if (baud <= 0)
-        baud = DEFAULT_DISCOVERY_BAUD;
-
-    divisor = (unsigned int)(115200L / baud);
-    if (divisor == 0)
-        divisor = 1;
-
-    outportb(base + UART_IER, 0x00);
-    outportb(base + UART_LCR, LCR_DLAB);
-    outportb(base + UART_DLL, (unsigned char)(divisor & 0xFF));
-    outportb(base + UART_DLM, (unsigned char)((divisor >> 8) & 0xFF));
-    outportb(base + UART_LCR, LCR_8N1);
-    outportb(base + UART_FCR, 0x07);
-    outportb(base + UART_MCR, MCR_DTR_RTS_OUT2);
-}
-
-void SerialManager::flush_receive(unsigned int base)
-{
-    int guard = 0;
-
-    while (data_ready(base) == TRUE && guard < DISCOVERY_PACKET_SIZE)
-    {
-        read_byte(base);
-        guard++;
-    }
-}
-
-void SerialManager::shutdown_port(unsigned int base)
-{
-    int guard = 0;
-
-    if (base == 0)
-        return;
-
-    while (transmit_ready(base) == FALSE && guard < 1000)
-    {
-        delay(1);
-        guard++;
-    }
-
-    outportb(base + UART_IER, 0x00);
-    outportb(base + UART_FCR, 0x00);
-    outportb(base + UART_MCR, 0x00);
-    flush_receive(base);
-}
-
-unsigned char SerialManager::read_byte(unsigned int base)
-{
-    return inportb(base + UART_RBR);
-}
-
-void SerialManager::write_byte(unsigned int base, unsigned char value)
-{
-    outportb(base + UART_THR, value);
-}
-
-void SerialManager::update_zmodem_watch(char *buffer, int *length, unsigned char value, const char *direction)
-{
-    int i;
-
-    if (*length >= 31)
-    {
-        for (i = 0; i < 30; i++)
-            buffer[i] = buffer[i + 1];
-        *length = 30;
-    }
-
-    buffer[*length] = (char)value;
-    (*length)++;
-    buffer[*length] = '\0';
-
-    if (strstr(buffer, "rz") != NULL ||
-        strstr(buffer, "sz") != NULL ||
-        strstr(buffer, "**B") != NULL ||
-        strstr(buffer, "ZRQINIT") != NULL ||
-        strstr(buffer, "ZFILE") != NULL)
-    {
-        println("Possible ZModem traffic detected on %s", direction);
-        *length = 0;
-        buffer[0] = '\0';
-    }
 }
 
 int SerialManager::mouse_driver_present(void)
@@ -1261,7 +1072,7 @@ void SerialManager::show_diagnostics(void)
         unsigned int base = get_com_base(i);
         int standard_irq = get_standard_irq(i);
         int uart_type = detect_uart_type(base);
-        int recommended_baud = get_recommended_baud(uart_type);
+        long recommended_baud = get_recommended_baud(uart_type);
 
         if (base == 0)
         {
@@ -1282,7 +1093,7 @@ void SerialManager::show_diagnostics(void)
                     standard_irq,
                     base,
                     get_uart_type_name(uart_type));
-            println("     recommended %-6d %s",
+            println("     recommended %-6ld %s",
                     recommended_baud,
                     get_baud_note(uart_type));
         }
@@ -1380,6 +1191,78 @@ void SerialManager::show_diagnostics(void)
     println("");
     println("Press any key to continue");
     getch();
+}
+
+int SerialManager::data_ready(unsigned int base)
+{
+    return ((inportb(base + UART_LSR) & LSR_DATA_READY) != 0);
+}
+
+int SerialManager::transmit_ready(unsigned int base)
+{
+    return ((inportb(base + UART_LSR) & LSR_THR_EMPTY) != 0);
+}
+
+void SerialManager::initialize_port(unsigned int base, long baud)
+{
+    unsigned int divisor;
+
+    if (base == 0)
+        return;
+    if (baud <= 0)
+        baud = DEFAULT_DISCOVERY_BAUD;
+
+    divisor = (unsigned int)(115200L / baud);
+    if (divisor == 0)
+        divisor = 1;
+
+    outportb(base + UART_IER, 0x00);
+    outportb(base + UART_LCR, LCR_DLAB);
+    outportb(base + UART_DLL, (unsigned char)(divisor & 0xFF));
+    outportb(base + UART_DLM, (unsigned char)((divisor >> 8) & 0xFF));
+    outportb(base + UART_LCR, LCR_8N1);
+    outportb(base + UART_FCR, 0x07);
+    outportb(base + UART_MCR, MCR_DTR_RTS_OUT2);
+}
+
+void SerialManager::flush_receive(unsigned int base)
+{
+    int guard = 0;
+
+    while (data_ready(base) == TRUE && guard < DISCOVERY_PACKET_SIZE)
+    {
+        read_byte(base);
+        guard++;
+    }
+}
+
+void SerialManager::shutdown_port(unsigned int base)
+{
+    int guard = 0;
+
+    if (base == 0)
+        return;
+
+    while (transmit_ready(base) == FALSE && guard < 1000)
+    {
+        delay(1);
+        guard++;
+    }
+
+    outportb(base + UART_IER, 0x00);
+    outportb(base + UART_FCR, 0x00);
+    outportb(base + UART_MCR, 0x00);
+    flush_receive(base);
+}
+
+unsigned char SerialManager::read_byte(unsigned int base)
+{
+    return inportb(base + UART_RBR);
+}
+
+void SerialManager::write_byte(unsigned int base, unsigned char value)
+{
+    outportb(base + UART_THR, value);
 }
 
 void SerialManager::run_who_is_there(void)
@@ -1552,7 +1435,8 @@ void SerialManager::run_who_is_there(void)
                             while (read_discovery_frame(receive_buffers[port_index],
                                                         &receive_lengths[port_index],
                                                         frame,
-                                                        sizeof(frame)) == TRUE)
+                                                        sizeof(frame),
+                                                        ports[port_index]) == TRUE)
                             {
                                 if (handle_discovery_frame(frame,
                                                            route_names,
@@ -1602,60 +1486,4 @@ void SerialManager::run_who_is_there(void)
     println("");
     println("Press any key to continue");
     getch();
-}
-
-int SerialManager::passthrough(int port_a, int port_b, int watch_zmodem)
-{
-    unsigned int base_a = get_com_base(port_a);
-    unsigned int base_b = get_com_base(port_b);
-    char watch_a[32] = {"\0"};
-    char watch_b[32] = {"\0"};
-    int watch_a_len = 0;
-    int watch_b_len = 0;
-
-    if (base_a == 0 || base_b == 0)
-    {
-        println("Invalid COM port selection");
-        return ERROR;
-    }
-
-    if (uart_present(base_a) == FALSE || uart_present(base_b) == FALSE)
-    {
-        println("One or both UARTs did not respond");
-        println("COM%d base 0x%04X, COM%d base 0x%04X", port_a, base_a, port_b, base_b);
-        return ERROR;
-    }
-
-    clrscr();
-    println("Pass-through mode: COM%d <-> COM%d", port_a, port_b);
-    println("Press X to exit");
-    println("");
-
-    while (1)
-    {
-        if (kbhit())
-        {
-            char key = getch();
-            if (key == 'x' || key == 'X')
-                break;
-        }
-
-        if (data_ready(base_a) && transmit_ready(base_b))
-        {
-            unsigned char value = read_byte(base_a);
-            write_byte(base_b, value);
-            if (watch_zmodem == TRUE)
-                update_zmodem_watch(watch_a, &watch_a_len, value, "COM A -> COM B");
-        }
-
-        if (data_ready(base_b) && transmit_ready(base_a))
-        {
-            unsigned char value = read_byte(base_b);
-            write_byte(base_a, value);
-            if (watch_zmodem == TRUE)
-                update_zmodem_watch(watch_b, &watch_b_len, value, "COM B -> COM A");
-        }
-    }
-
-    return SUCCESS;
 }

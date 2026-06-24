@@ -29,6 +29,10 @@ private:
     int get_route_port_for_machine(char *machine);
     int get_routed_upload_port(void);
     int build_port_order(int *ports, int portcount, int routed_port, int avoid_port, int *ordered_ports, int max_ports);
+    int get_pending_xfl_endpoints(char *source, char *target);
+    int is_express_relay_for(char *source, char *target);
+    int get_bridge_peer_port(int outbound_port, int inbound_port, int *ports, int portcount);
+    int get_express_bridge_wait_seconds(void);
     void execute_once_hooks(void);
     void execute_external_tool(char *toolname);
 

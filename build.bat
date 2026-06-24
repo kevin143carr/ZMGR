@@ -1,6 +1,8 @@
 @echo off
 del *.exe
 del *.obj
-echo building zmgr
-make -B -f zmgr.mak
-echo finished building zmgr.exe
+del BUILD.LOG
+echo building zmgr > BUILD.LOG
+make -B -f zmgr.mak >> BUILD.LOG
+echo finished building zmgr.exe >> BUILD.LOG
+type BUILD.LOG

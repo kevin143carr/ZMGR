@@ -30,17 +30,21 @@ ZMFT_dependencies =  \
  upldmgr.obj \
  transfer.obj \
  configcl.obj \
+ serbrdg.obj \
  zmft.obj \
  execpgm.obj \
- secrets.obj
+ secrets.obj \
+ dosser.lib
 
 ZMSER_dependencies =  \
- serial.obj \
- zmser.obj
+ serbrdg.obj \
+ zmser.obj \
+ dosser.lib
 
 ZMDIAG_dependencies =  \
  serial.obj \
- zmdiag.obj
+ zmdiag.obj \
+ dosser.lib
 
 ZMCFG_dependencies =  \
  zmcfg.obj
@@ -69,6 +73,7 @@ procman.obj+
 upldmgr.obj+
 transfer.obj+
 configcl.obj+
+serbrdg.obj+
 zmft.obj+
 execpgm.obj+
 secrets.obj
@@ -76,18 +81,20 @@ zmft
 		# no map file
 emu.lib+
 mathl.lib+
+dosser.lib+
 cl.lib
 |
 
 zmser.exe: build.cfg $(ZMSER_dependencies)
   $(TLINK) /v/x/c/P-/L$(LIBPATH) @&&|
 c0l.obj+
-serial.obj+
+serbrdg.obj+
 zmser.obj
 zmser
 		# no map file
 emu.lib+
 mathl.lib+
+dosser.lib+
 cl.lib
 |
 
@@ -100,6 +107,7 @@ zmdiag
 		# no map file
 emu.lib+
 mathl.lib+
+dosser.lib+
 cl.lib
 |
 
@@ -113,6 +121,10 @@ emu.lib+
 mathl.lib+
 cl.lib
 |
+
+dosser.lib: build.cfg dosser.obj
+  if exist dosser.lib del dosser.lib
+  $(TLIB) dosser.lib +dosser.obj
 
 
 #		*Individual File Dependencies*
@@ -131,6 +143,10 @@ transfer.obj: build.cfg transfer.cpp
 configcl.obj: build.cfg configcl.cpp
 
 serial.obj: build.cfg serial.cpp
+
+serbrdg.obj: build.cfg serbrdg.cpp
+
+dosser.obj: build.cfg dosser.c dosser.h
 
 zmgr.obj: build.cfg zmgr.cpp
 

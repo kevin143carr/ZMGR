@@ -11,8 +11,6 @@ int DownloadManager::checkforforwardfiles(char *sourcefolder)
 {
     if (count_files_of_type(sourcefolder, "XFL") > 0)
         return TRUE;
-    if (count_files_of_type(sourcefolder, "RDY") > 0)
-        return TRUE;
     return forwardmanager->checkforforwardfiles(sourcefolder);
 }
 
@@ -102,21 +100,6 @@ static int read_express_file(char *filename, char *source, char *target, char *p
     if (source[0] == '\0' || target[0] == '\0' || payload[0] == '\0')
         return ERROR;
 
-    return TRUE;
-}
-
-static int write_express_file(char *filename, char *source, char *target, char *payload)
-{
-    FILE *file;
-
-    file = fopen(filename, "w");
-    if (file == NULL)
-        return ERROR;
-
-    fprintf(file, "SOURCE=%s\n", source);
-    fprintf(file, "TARGET=%s\n", target);
-    fprintf(file, "PAYLOAD=%s\n", payload);
-    fclose(file);
     return TRUE;
 }
 
@@ -273,7 +256,6 @@ int DownloadManager::processxflfile()
 {
     char xflfile[MAX_FILE_SIZE] = {"\0"};
     char uploadfile[MAX_FILE_SIZE] = {"\0"};
-    char readyfile[MAX_FILE_SIZE] = {"\0"};
     char source[MAX_FILENAME_LENGTH] = {"\0"};
     char target[MAX_FILENAME_LENGTH] = {"\0"};
     char payload[MAX_FILE_SIZE] = {"\0"};
@@ -294,13 +276,9 @@ int DownloadManager::processxflfile()
 
     if (strcmp(target, computername) == 0)
     {
-        sprintf(readyfile, "%s\\%s.RDY", config->getconfigvalue(UPLOADFOLDER), source);
-        to_upper_case(readyfile);
-        if (write_express_file(readyfile, source, target, payload) == ERROR)
-            return ERROR;
         remove(xflfile);
-        println("Express handshake reached %s", computername);
-        return TRUE;
+        println("Express handshake reached %s; awaiting payload", computername);
+        return FALSE;
     }
 
     sprintf(uploadfile, "%s\\%s.XFL", config->getconfigvalue(UPLOADFOLDER), target);
@@ -309,54 +287,6 @@ int DownloadManager::processxflfile()
         return ERROR;
 
     println("Express setup forwarded toward %s", target);
-    return TRUE;
-}
-
-int DownloadManager::processrdyfile()
-{
-    char rdyfile[MAX_FILE_SIZE] = {"\0"};
-    char uploadfile[MAX_FILE_SIZE] = {"\0"};
-    char source[MAX_FILENAME_LENGTH] = {"\0"};
-    char target[MAX_FILENAME_LENGTH] = {"\0"};
-    char payload[MAX_FILE_SIZE] = {"\0"};
-    char computername[MAX_FILENAME_LENGTH] = {"\0"};
-    FILE *forwardfile;
-
-    if (first_file_of_type(config->getconfigvalue(DOWNLOADFOLDER), "RDY", rdyfile) == FALSE)
-        return FALSE;
-
-    if (read_express_file(rdyfile, source, target, payload) == ERROR)
-    {
-        println("Ready file is incomplete: %s", rdyfile);
-        remove(rdyfile);
-        return ERROR;
-    }
-
-    strcpy(computername, config->getconfigvalue(COMPUTERNAME));
-    to_upper_case(computername);
-
-    if (strcmp(source, computername) == 0)
-    {
-        sprintf(uploadfile, "%s\\%s.FIL", config->getconfigvalue(UPLOADFOLDER), target);
-        to_upper_case(uploadfile);
-        forwardfile = fopen(uploadfile, "w");
-        if (forwardfile == NULL)
-            return ERROR;
-
-        fprintf(forwardfile, "%s\n", payload);
-        fprintf(forwardfile, "%s\n", uploadfile);
-        fclose(forwardfile);
-        remove(rdyfile);
-        println("Express payload staged for %s", target);
-        return TRUE;
-    }
-
-    sprintf(uploadfile, "%s\\%s.RDY", config->getconfigvalue(UPLOADFOLDER), source);
-    to_upper_case(uploadfile);
-    if (movefile(rdyfile, uploadfile) == ERROR)
-        return ERROR;
-
-    println("Express ready forwarded toward %s", source);
     return TRUE;
 }
 
@@ -377,9 +307,6 @@ int DownloadManager::processforwardfiles()
 
     if (count_files_of_type(downloadfolder, "XFL") > 0)
         return processxflfile();
-
-    if (count_files_of_type(downloadfolder, "RDY") > 0)
-        return processrdyfile();
 
     sprintf(forwardfilename, "%s\\%s", config->getconfigvalue(DOWNLOADFOLDER), forwardmanager->getforwardfilename());
 

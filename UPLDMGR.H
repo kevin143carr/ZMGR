@@ -12,6 +12,8 @@ private:
 	Transfer *tranfer;
     ForwardManager *forwardmanager;
 
+    int stage_express_payload_for_xfl(char *target, char *payload);
+
 public:
     UploadManager();
     void setupconfig(ConfigClass *config);

@@ -1,4 +1,7 @@
 #include "PROCMAN.H"
+#include "SERIAL.H"
+
+#define EXPRESS_BRIDGE_IDLE_SECONDS 30
 
 void draw_process_border(int left, int top, int width, int height)
 {
@@ -306,17 +309,6 @@ int ProcessManager::get_routed_upload_port(void)
 		return routed_port;
 	}
 
-	if (first_process_file_of_type(uploadfolder, "RDY", controlfile) == TRUE)
-	{
-		if (read_express_route_name(controlfile, "SOURCE", machine) == TRUE)
-		{
-			routed_port = get_route_port_for_machine(machine);
-			if (routed_port > 0)
-				println("Route %s via COM%d", machine, routed_port);
-		}
-		return routed_port;
-	}
-
 	filecount = count_files_of_type(uploadfolder, "FIL");
 	if (filecount <= 0)
 		return 0;
@@ -379,6 +371,68 @@ int ProcessManager::build_port_order(int *ports, int portcount, int routed_port,
 	}
 
 	return ordered_count;
+}
+
+int ProcessManager::get_pending_xfl_endpoints(char *source, char *target)
+{
+	char xflfile[MAX_FILE_SIZE] = {"\0"};
+
+	source[0] = '\0';
+	target[0] = '\0';
+
+	if (first_process_file_of_type(config->getconfigvalue(UPLOADFOLDER), "XFL", xflfile) == FALSE)
+		return FALSE;
+
+	if (read_express_route_name(xflfile, "SOURCE", source) != TRUE)
+		return FALSE;
+	if (read_express_route_name(xflfile, "TARGET", target) != TRUE)
+		return FALSE;
+
+	return TRUE;
+}
+
+int ProcessManager::is_express_relay_for(char *source, char *target)
+{
+	char computername[MAX_FILENAME_LENGTH] = {"\0"};
+
+	strcpy(computername, config->getconfigvalue(COMPUTERNAME));
+	to_upper_case(computername);
+
+	if (strcmp(computername, source) == 0)
+		return FALSE;
+	if (strcmp(computername, target) == 0)
+		return FALSE;
+
+	return TRUE;
+}
+
+int ProcessManager::get_bridge_peer_port(int outbound_port, int inbound_port, int *ports, int portcount)
+{
+	int i;
+
+	if (inbound_port > 0 && inbound_port != outbound_port)
+		return inbound_port;
+
+	if (portcount == 2)
+	{
+		for (i = 0; i < portcount; i++)
+		{
+			if (ports[i] != outbound_port)
+				return ports[i];
+		}
+	}
+
+	return 0;
+}
+
+int ProcessManager::get_express_bridge_wait_seconds(void)
+{
+	int value = atoi(config->getconfigvalue(EXPRESSBRIDGEWAIT));
+
+	if (value <= 0)
+		return 30;
+
+	return value;
 }
 
 void ProcessManager::execute_once_hooks(void)
@@ -452,18 +506,44 @@ void ProcessManager::execute_file_transfer_loop(void)
 			 */
 			if (upmanager->checkforuploads() > 0)
 			{
+				char xfl_source[MAX_FILENAME_LENGTH] = {"\0"};
+				char xfl_target[MAX_FILENAME_LENGTH] = {"\0"};
+				int pending_xfl_relay = FALSE;
+				int inbound_port = avoid_upload_port;
+				int outbound_port = ordered_ports[i];
+				int bridge_port = 0;
+
 				println("Uploads Found");
 				uploadhandled = TRUE;
-				if (routed_port == 0 && avoid_upload_port == ordered_ports[i])
+				if (get_pending_xfl_endpoints(xfl_source, xfl_target) == TRUE)
+					pending_xfl_relay = is_express_relay_for(xfl_source, xfl_target);
+
+				if (routed_port == 0 && avoid_upload_port == outbound_port)
 				{
-					println("No route yet; not sending back on COM%d", ordered_ports[i]);
+					println("No route yet; not sending back on COM%d", outbound_port);
 				}
-				else if (upmanager->beginuploads(ordered_ports[i]) == -1)
+				else if (upmanager->beginuploads(outbound_port) == -1)
 				{
 					println("Error during uploads");
 				}
 				else
 				{
+					if (pending_xfl_relay == TRUE)
+					{
+						bridge_port = get_bridge_peer_port(outbound_port, inbound_port, ports, portcount);
+						if (bridge_port > 0)
+						{
+							SerialManager serialmanager;
+							int bridge_wait_seconds = get_express_bridge_wait_seconds();
+
+							println("Express .XFL relayed; bridge mode COM%d <-> COM%d", bridge_port, outbound_port);
+							serialmanager.passthrough_until_idle_after_traffic(bridge_port,
+																			outbound_port,
+																			TRUE,
+																			EXPRESS_BRIDGE_IDLE_SECONDS,
+																			bridge_wait_seconds);
+						}
+					}
 					avoid_upload_port = 0;
 				}
 			}
