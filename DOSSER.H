@@ -41,6 +41,7 @@ extern "C" {
 #define SER_ERR_NULL_PTR                -14
 #define SER_ERR_IRQ_NOT_FOUND           -15
 #define SER_ERR_LOCK_MEM                -16
+#define SER_ERR_IRQ_IN_USE              -17
 
 int  serial_open(int com, long bps, int data_bits, char parity, int stop_bits, int handshaking);
 int  serial_close(int com);
@@ -78,19 +79,6 @@ int  serial_get_rx_buffered(int comport);
 int  serial_clear_tx_buffer(int comport);
 int  serial_clear_rx_buffer(int comport);
 
-typedef struct
-{
-    unsigned long a_to_b_bytes;
-    unsigned long b_to_a_bytes;
-    unsigned long a_to_b_dropped;
-    unsigned long b_to_a_dropped;
-    int a_to_b_peak_pending;
-    int b_to_a_peak_pending;
-} SerialBridgeStats;
-
-int  serial_bridge_start(int com_a, int com_b);
-int  serial_bridge_stop(int com_a, int com_b);
-int  serial_bridge_get_stats(int com_a, int com_b, SerialBridgeStats* stats);
 
 #ifdef __cplusplus
 }

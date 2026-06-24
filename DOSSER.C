@@ -291,6 +291,7 @@ static unsigned char PIC_READ_IRR(unsigned int port){PIC_WRITE_OCW3(port, PIC_RR
 #define UART_BPS_DIVISOR_4800         24
 #define UART_BPS_DIVISOR_7200         16
 #define UART_BPS_DIVISOR_9600         12
+#define UART_BPS_DIVISOR_14400         8
 #define UART_BPS_DIVISOR_19200         6
 #define UART_BPS_DIVISOR_38400         3
 #define UART_BPS_DIVISOR_57600         2
@@ -360,89 +361,6 @@ static serial_struct g_comports[COM_MAX+1] =
 #endif
 };
 
-static signed char g_bridge_peer[COM_MAX+1] = {-1, -1, -1, -1};
-static unsigned long g_bridge_bytes[COM_MAX+1] = {0, 0, 0, 0};
-static unsigned long g_bridge_dropped[COM_MAX+1] = {0, 0, 0, 0};
-static int g_bridge_peak_pending[COM_MAX+1] = {0, 0, 0, 0};
-
-static void serial_bridge_set_rx_flow(serial_struct* com, int flow_on)
-{
-    if(com->rx_flow_on == flow_on)
-        return;
-
-    com->rx_flow_on = flow_on;
-    switch(com->flow_mode)
-    {
-        case SER_HANDSHAKING_RTSCTS:
-            if(flow_on)
-                UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) | UART_MCR_RTS);
-            else
-                UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) & ~UART_MCR_RTS);
-            break;
-        case SER_HANDSHAKING_XONXOFF:
-            UART_WRITE_DATA(com, flow_on ? SER_XON : SER_XOFF);
-            break;
-        case SER_HANDSHAKING_DTRDSR:
-            if(flow_on)
-                UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) | UART_MCR_DTR);
-            else
-                UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) & ~UART_MCR_DTR);
-            break;
-        case SER_HANDSHAKING_NONE:
-            break;
-    }
-}
-
-static void serial_bridge_maybe_resume_sources(serial_struct* peer)
-{
-    serial_struct* com_min = (serial_struct*)(g_comports);
-    serial_struct* com_max = com_min + COM_MAX;
-    serial_struct* source;
-
-    if(!SER_TX_BUFFER_LOWATER(peer))
-        return;
-
-    for(source=com_min;source<=com_max;source++)
-        if(source->open && g_bridge_peer[source->port] == peer->port)
-            serial_bridge_set_rx_flow(source, 1);
-}
-
-static void serial_bridge_enqueue(serial_struct* source, unsigned char data)
-{
-    int peer_index;
-    serial_struct* peer;
-    int pending;
-
-    peer_index = g_bridge_peer[source->port];
-    if(peer_index < COM_MIN || peer_index > COM_MAX)
-        return;
-
-    peer = (serial_struct*)(g_comports + peer_index);
-    if(!peer->open)
-    {
-        g_bridge_dropped[source->port]++;
-        return;
-    }
-
-    if(SER_TX_BUFFER_FULL(peer))
-    {
-        g_bridge_dropped[source->port]++;
-        serial_bridge_set_rx_flow(source, 0);
-        return;
-    }
-
-    SER_TX_BUFFER_WRITE(peer, data);
-    g_bridge_bytes[source->port]++;
-    pending = SER_TX_BUFFER_CURRENT(peer);
-    if(pending > g_bridge_peak_pending[source->port])
-        g_bridge_peak_pending[source->port] = pending;
-
-    UART_WRITE_INTERRUPT_ENABLE(peer, UART_READ_INTERRUPT_ENABLE(peer) | UART_IER_TX_HOLD_EMPTY);
-    if(SER_TX_BUFFER_HIWATER(peer))
-        serial_bridge_set_rx_flow(source, 0);
-}
-
-
 
 /* ======================================================================== */
 /* ====================== INTERRUPT SERVICE ROUTINE ======================= */
@@ -492,11 +410,6 @@ static void Interrupt com_general_isr(void)
                                 com->tx_flow_on = data == SER_XON;
                                 if(!SER_TX_BUFFER_EMPTY(com) && com->tx_flow_on)
                                     UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) | UART_IER_TX_HOLD_EMPTY);
-                            }
-
-                            else if(g_bridge_peer[com->port] >= COM_MIN)
-                            {
-                                serial_bridge_enqueue(com, data);
                             }
 
                             /* Store it if there's room, or throw it out */
@@ -549,7 +462,6 @@ static void Interrupt com_general_isr(void)
                         int cnt;
                         for (cnt=0; cnt<UART_FIFO_SIZE_IN_BYTES && com->tx_flow_on && !SER_TX_BUFFER_EMPTY(com); cnt++)
                             UART_WRITE_DATA(com, SER_TX_BUFFER_READ(com));
-                        serial_bridge_maybe_resume_sources(com);
                         if(SER_TX_BUFFER_EMPTY(com) || !com->tx_flow_on)
                             UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) & ~UART_IER_TX_HOLD_EMPTY);
                         break;
@@ -1027,9 +939,6 @@ int serial_close(int comport)
     UART_WRITE_MODEM_CONTROL(com, 0);
     serial_set_fifo_threshold(comport, 0);
 
-    if(g_bridge_peer[comport] >= COM_MIN && g_bridge_peer[comport] <= COM_MAX)
-        g_bridge_peer[g_bridge_peer[comport]] = -1;
-    g_bridge_peer[comport] = -1;
     com->open = 0;
 
     return SER_SUCCESS;
@@ -1161,6 +1070,9 @@ int serial_set_base(int comport, int base)
 int serial_set_irq(int comport, int irq)
 {
     serial_struct* com = (serial_struct*)(g_comports + comport);
+    serial_struct* com_min = (serial_struct*)(g_comports);
+    serial_struct* com_max = com_min + COM_MAX;
+    serial_struct* ptr;
     int rc;
 
     if(comport < COM_MIN || comport > COM_MAX)
@@ -1169,6 +1081,10 @@ int serial_set_irq(int comport, int irq)
         return SER_ERR_INVALID_IRQ;
     if(!com->open)
         return SER_ERR_NOT_OPEN;
+
+    for(ptr=com_min;ptr<=com_max;ptr++)
+        if(ptr != com && ptr->open && ptr->irq == irq)
+            return SER_ERR_IRQ_IN_USE;
 
     /* Remove any ISRs on this com port's current IRQ */
     serial_free_irq(comport);
@@ -1243,6 +1159,9 @@ int serial_set_bps(int comport, long bps)
             return SER_SUCCESS;
         case 19200L:
             UART_WRITE_BPS(com, UART_BPS_DIVISOR_19200);
+            return SER_SUCCESS;
+        case 14400L:
+            UART_WRITE_BPS(com, UART_BPS_DIVISOR_14400);
             return SER_SUCCESS;
         case 9600L:
             UART_WRITE_BPS(com, UART_BPS_DIVISOR_9600);
@@ -1484,6 +1403,8 @@ long serial_get_bps(int comport)
             return 38400L;
         case UART_BPS_DIVISOR_19200:
             return 19200L;
+        case UART_BPS_DIVISOR_14400:
+            return 14400L;
         case UART_BPS_DIVISOR_9600:
             return 9600L;
         case UART_BPS_DIVISOR_7200:
@@ -1743,75 +1664,3 @@ int serial_clear_rx_buffer(int comport)
     return SER_SUCCESS;
 }
 
-int serial_bridge_start(int com_a, int com_b)
-{
-    serial_struct* a = (serial_struct*)(g_comports + com_a);
-    serial_struct* b = (serial_struct*)(g_comports + com_b);
-
-    if(com_a < COM_MIN || com_a > COM_MAX || com_b < COM_MIN || com_b > COM_MAX)
-        return SER_ERR_INVALID_COMPORT;
-    if(com_a == com_b)
-        return SER_ERR_INVALID_COMPORT;
-    if(!a->open || !b->open)
-        return SER_ERR_NOT_OPEN;
-
-    CPU_DISABLE_INTERRUPTS();
-    SER_RX_BUFFER_INIT(a);
-    SER_RX_BUFFER_INIT(b);
-    SER_TX_BUFFER_INIT(a);
-    SER_TX_BUFFER_INIT(b);
-    g_bridge_peer[com_a] = (signed char)com_b;
-    g_bridge_peer[com_b] = (signed char)com_a;
-    g_bridge_bytes[com_a] = 0;
-    g_bridge_bytes[com_b] = 0;
-    g_bridge_dropped[com_a] = 0;
-    g_bridge_dropped[com_b] = 0;
-    g_bridge_peak_pending[com_a] = 0;
-    g_bridge_peak_pending[com_b] = 0;
-    serial_bridge_set_rx_flow(a, 1);
-    serial_bridge_set_rx_flow(b, 1);
-    CPU_ENABLE_INTERRUPTS();
-
-    return SER_SUCCESS;
-}
-
-int serial_bridge_stop(int com_a, int com_b)
-{
-    serial_struct* a = (serial_struct*)(g_comports + com_a);
-    serial_struct* b = (serial_struct*)(g_comports + com_b);
-
-    if(com_a < COM_MIN || com_a > COM_MAX || com_b < COM_MIN || com_b > COM_MAX)
-        return SER_ERR_INVALID_COMPORT;
-
-    CPU_DISABLE_INTERRUPTS();
-    if(g_bridge_peer[com_a] == com_b)
-        g_bridge_peer[com_a] = -1;
-    if(g_bridge_peer[com_b] == com_a)
-        g_bridge_peer[com_b] = -1;
-    if(a->open)
-        serial_bridge_set_rx_flow(a, 1);
-    if(b->open)
-        serial_bridge_set_rx_flow(b, 1);
-    CPU_ENABLE_INTERRUPTS();
-
-    return SER_SUCCESS;
-}
-
-int serial_bridge_get_stats(int com_a, int com_b, SerialBridgeStats* stats)
-{
-    if(com_a < COM_MIN || com_a > COM_MAX || com_b < COM_MIN || com_b > COM_MAX)
-        return SER_ERR_INVALID_COMPORT;
-    if(stats == 0)
-        return SER_ERR_NULL_PTR;
-
-    CPU_DISABLE_INTERRUPTS();
-    stats->a_to_b_bytes = g_bridge_bytes[com_a];
-    stats->b_to_a_bytes = g_bridge_bytes[com_b];
-    stats->a_to_b_dropped = g_bridge_dropped[com_a];
-    stats->b_to_a_dropped = g_bridge_dropped[com_b];
-    stats->a_to_b_peak_pending = g_bridge_peak_pending[com_a];
-    stats->b_to_a_peak_pending = g_bridge_peak_pending[com_b];
-    CPU_ENABLE_INTERRUPTS();
-
-    return SER_SUCCESS;
-}
