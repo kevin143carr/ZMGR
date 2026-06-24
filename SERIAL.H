@@ -33,7 +33,7 @@ private:
 public:
     void show_diagnostics(void);
     void run_who_is_there(void);
-    int passthrough(int port_a, int port_b, int watch_zmodem);
+    int passthrough(int port_a, int port_b, int watch_zmodem, int handshaking);
     int passthrough_until_idle_after_traffic(int port_a, int port_b, int watch_zmodem, int idle_seconds, int max_wait_seconds);
 };
 
