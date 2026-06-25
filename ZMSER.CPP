@@ -12,7 +12,8 @@ int main(void)
 	int port_a = 0;
 	int port_b = 0;
 	int watch_zmodem = TRUE;
-	int handshaking = SER_HANDSHAKING_RTSCTS;
+	int bridge_mode = BRIDGE_MODE_ZMODEM;
+	long bridge_baud = 19200L;
 	char input[10] = {"\0"};
 
 	clrscr();
@@ -29,15 +30,44 @@ int main(void)
 
 	memset(input, 0, sizeof(input));
 	println("");
-	println("Handshaking mode:");
-	println("1. RTS/CTS hardware flow control");
-	println("2. None - direct null modem/game mode");
+	println("Bridge mode:");
+	println("1. ZModem optimized bridge");
+	println("2. Simple null-modem bridge");
 	println("Select mode [1]:");
 	fgets(input, sizeof(input), stdin);
 	if (atoi(input) == 2)
-		handshaking = SER_HANDSHAKING_NONE;
+		bridge_mode = BRIDGE_MODE_SIMPLE;
 
-	serialmanager.passthrough(port_a, port_b, watch_zmodem, handshaking);
+	memset(input, 0, sizeof(input));
+	println("");
+	println("Baud rate:");
+	println("1. 1200");
+	println("2. 2400");
+	println("3. 4800");
+	println("4. 9600");
+	println("5. 19200");
+	println("Select baud [5]:");
+	fgets(input, sizeof(input), stdin);
+	switch (atoi(input))
+	{
+		case 1:
+			bridge_baud = 1200L;
+			break;
+		case 2:
+			bridge_baud = 2400L;
+			break;
+		case 3:
+			bridge_baud = 4800L;
+			break;
+		case 4:
+			bridge_baud = 9600L;
+			break;
+		default:
+			bridge_baud = 19200L;
+			break;
+	}
+
+	serialmanager.passthrough(port_a, port_b, watch_zmodem, bridge_mode, bridge_baud);
 
 	println("");
 	println("Returning to ZMGR");

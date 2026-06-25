@@ -11,6 +11,8 @@
 #define DEFAULT_BRIDGE_BAUD 19200L
 #define MIN_BRIDGE_BAUD 110L
 #define MAX_BRIDGE_BAUD 115200L
+#define MIN_MANUAL_BRIDGE_BAUD 1200L
+#define MAX_MANUAL_BRIDGE_BAUD 19200L
 #define PUMP_CHUNK 256
 
 typedef struct
@@ -23,6 +25,8 @@ typedef struct
 {
     unsigned long a_to_b_bytes;
     unsigned long b_to_a_bytes;
+    unsigned long a_reads;
+    unsigned long b_reads;
     unsigned long a_to_b_stalled;
     unsigned long b_to_a_stalled;
     unsigned long a_to_b_partial;
@@ -103,6 +107,13 @@ static long get_bridge_baud(void)
     return value;
 }
 
+static long validate_manual_bridge_baud(long baud)
+{
+    if (baud < MIN_MANUAL_BRIDGE_BAUD || baud > MAX_MANUAL_BRIDGE_BAUD)
+        return DEFAULT_BRIDGE_BAUD;
+    return baud;
+}
+
 static int bridge_serial_port(int port)
 {
     if (port == 1) return COM_1;
@@ -144,6 +155,13 @@ static const char *bridge_handshaking_label(int handshaking)
     if (handshaking == SER_HANDSHAKING_RTSCTS)
         return "hardware RTS/CTS";
     return "custom";
+}
+
+static const char *bridge_mode_label(int bridge_mode)
+{
+    if (bridge_mode == BRIDGE_MODE_SIMPLE)
+        return "Simple null-modem";
+    return "ZModem optimized";
 }
 
 static int bridge_open_serial(int port_number, int serial_port, long baud, int handshaking)
@@ -251,14 +269,100 @@ static int pump_direction(int from,
     return SER_SUCCESS;
 }
 
+static int pump_direction_simple(int from,
+                                 int to,
+                                 BridgePending *pending,
+                                 unsigned long *read_count,
+                                 unsigned long *byte_count,
+                                 unsigned long *stalled_count,
+                                 unsigned long *partial_count,
+                                 unsigned long *idle_count)
+{
+    int n;
+    int written;
+
+    if (pending->len > 0)
+    {
+        written = serial_write_direct_ready(to, pending->data, pending->len);
+        if (written < 0)
+            return written;
+        if (written > 0)
+        {
+            *byte_count += written;
+            if (written < pending->len)
+            {
+                memmove(pending->data, pending->data + written, pending->len - written);
+                *partial_count += 1;
+            }
+            pending->len -= written;
+        }
+        else
+        {
+            *stalled_count += 1;
+        }
+    }
+
+    if (pending->len == 0)
+    {
+        n = serial_read_direct(from, pending->data, PUMP_CHUNK);
+        if (n < 0)
+            return n;
+        if (n == 0)
+        {
+            *idle_count += 1;
+            return SER_SUCCESS;
+        }
+
+        *read_count += n;
+        written = serial_write_direct_ready(to, pending->data, n);
+        if (written < 0)
+            return written;
+        if (written > 0)
+            *byte_count += written;
+
+        if (written < n)
+        {
+            memmove(pending->data, pending->data + written, n - written);
+            pending->len = n - written;
+            if (written > 0)
+                *partial_count += 1;
+            else
+                *stalled_count += 1;
+        }
+    }
+
+    return SER_SUCCESS;
+}
+
 static int bridge_pump_once(int serial_a,
                             int serial_b,
                             BridgePending *pending_a_to_b,
                             BridgePending *pending_b_to_a,
                             BridgeStats *stats,
-                            int handshaking)
+                            int handshaking,
+                            int bridge_mode)
 {
     int rc;
+
+    if (bridge_mode == BRIDGE_MODE_SIMPLE)
+    {
+        rc = pump_direction_simple(serial_a, serial_b, pending_a_to_b,
+                                   &stats->a_reads,
+                                   &stats->a_to_b_bytes,
+                                   &stats->a_to_b_stalled,
+                                   &stats->a_to_b_partial,
+                                   &stats->a_to_b_idle);
+        if (rc != SER_SUCCESS)
+            return rc;
+
+        rc = pump_direction_simple(serial_b, serial_a, pending_b_to_a,
+                                   &stats->b_reads,
+                                   &stats->b_to_a_bytes,
+                                   &stats->b_to_a_stalled,
+                                   &stats->b_to_a_partial,
+                                   &stats->b_to_a_idle);
+        return rc;
+    }
 
     if (handshaking == SER_HANDSHAKING_RTSCTS)
     {
@@ -326,6 +430,11 @@ static void bridge_print_stats(const char *label,
     println("  COM%d->COM%d bytes=%lu pending=%d partial=%lu stalled=%lu",
             port_b, port_a, stats->b_to_a_bytes, pending_b_to_a->len,
             stats->b_to_a_partial, stats->b_to_a_stalled);
+    if (handshaking == SER_HANDSHAKING_NONE)
+    {
+        println("  direct reads COM%d=%lu COM%d=%lu",
+                port_a, stats->a_reads, port_b, stats->b_reads);
+    }
     if (handshaking == SER_HANDSHAKING_RTSCTS)
     {
         println("  CTS low iters COM%d=%lu COM%d=%lu",
@@ -343,11 +452,11 @@ static void bridge_print_stats(const char *label,
     }
 }
 
-int SerialManager::passthrough(int port_a, int port_b, int watch_zmodem, int handshaking)
+int SerialManager::passthrough(int port_a, int port_b, int watch_zmodem, int bridge_mode, long bridge_baud)
 {
     int serial_a = bridge_serial_port(port_a);
     int serial_b = bridge_serial_port(port_b);
-    long bridge_baud;
+    int handshaking;
     int bridge_result = SUCCESS;
     BridgePending pending_a_to_b;
     BridgePending pending_b_to_a;
@@ -360,9 +469,10 @@ int SerialManager::passthrough(int port_a, int port_b, int watch_zmodem, int han
         return ERROR;
     }
 
-    bridge_baud = get_bridge_baud();
-    if (handshaking != SER_HANDSHAKING_RTSCTS && handshaking != SER_HANDSHAKING_NONE)
-        handshaking = SER_HANDSHAKING_RTSCTS;
+    bridge_baud = validate_manual_bridge_baud(bridge_baud);
+    if (bridge_mode != BRIDGE_MODE_SIMPLE)
+        bridge_mode = BRIDGE_MODE_ZMODEM;
+    handshaking = bridge_mode == BRIDGE_MODE_SIMPLE ? SER_HANDSHAKING_NONE : SER_HANDSHAKING_RTSCTS;
 
     if (bridge_open_serial(port_a, serial_a, bridge_baud, handshaking) == ERROR)
         return ERROR;
@@ -372,13 +482,23 @@ int SerialManager::passthrough(int port_a, int port_b, int watch_zmodem, int han
         return ERROR;
     }
 
+    if (bridge_mode == BRIDGE_MODE_SIMPLE)
+    {
+        serial_disable_interrupts(serial_a);
+        serial_disable_interrupts(serial_b);
+        serial_set_rts(serial_a, 1);
+        serial_set_dtr(serial_a, 1);
+        serial_set_rts(serial_b, 1);
+        serial_set_dtr(serial_b, 1);
+    }
+
     pending_a_to_b.len = 0;
     pending_b_to_a.len = 0;
     bridge_init_stats(&stats);
 
     clrscr();
     println("Pass-through mode: COM%d <-> COM%d (%ld Baud)", port_a, port_b, bridge_baud);
-    println("Foreground serial pump bridge");
+    println("Foreground %s bridge", bridge_mode_label(bridge_mode));
     println("Bridge handshaking: %s", bridge_handshaking_label(handshaking));
     println("Press X to exit");
     println("");
@@ -394,7 +514,7 @@ int SerialManager::passthrough(int port_a, int port_b, int watch_zmodem, int han
                 break;
         }
 
-        rc = bridge_pump_once(serial_a, serial_b, &pending_a_to_b, &pending_b_to_a, &stats, handshaking);
+        rc = bridge_pump_once(serial_a, serial_b, &pending_a_to_b, &pending_b_to_a, &stats, handshaking, bridge_mode);
         if (rc != SER_SUCCESS)
         {
             println("Bridge pump error: %s (%d)", bridge_serial_error(rc), rc);
@@ -455,7 +575,7 @@ int SerialManager::passthrough_until_idle_after_traffic(int port_a, int port_b, 
 
     clrscr();
     println("Express bridge mode: COM%d <-> COM%d (%ld Baud)", port_a, port_b, bridge_baud);
-    println("Foreground serial pump bridge");
+    println("Foreground ZModem optimized bridge");
     println("Bridge handshaking: hardware RTS/CTS");
     println("Press X to exit\n");
     if (watch_zmodem == TRUE)
@@ -472,7 +592,7 @@ int SerialManager::passthrough_until_idle_after_traffic(int port_a, int port_b, 
                 break;
         }
 
-        rc = bridge_pump_once(serial_a, serial_b, &pending_a_to_b, &pending_b_to_a, &stats, SER_HANDSHAKING_RTSCTS);
+        rc = bridge_pump_once(serial_a, serial_b, &pending_a_to_b, &pending_b_to_a, &stats, SER_HANDSHAKING_RTSCTS, BRIDGE_MODE_ZMODEM);
         if (rc != SER_SUCCESS)
         {
             println("Bridge pump error: %s (%d)", bridge_serial_error(rc), rc);

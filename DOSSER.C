@@ -366,12 +366,91 @@ static serial_struct g_comports[COM_MAX+1] =
 /* ====================== INTERRUPT SERVICE ROUTINE ======================= */
 /* ======================================================================== */
 
+static void service_port(serial_struct* com)
+{
+    unsigned char int_id;
+    unsigned char data;
+
+    while((int_id=UART_READ_INTERRUPT_IDENTIFY(com) & UART_IIR_MASK) != UART_IIR_NO_INTERRUPT)
+    {
+        switch(int_id)
+        {
+            case UART_IIR_DATA_READY:
+                /* Read all data from the UART */
+                while(UART_READ_LINE_STATUS(com) & UART_LSR_DATA_READY)
+                {
+                    data = UART_READ_DATA(com);
+
+                    /* Handle XON/XOFF flow control (TX) */
+                    if(com->flow_mode == SER_HANDSHAKING_XONXOFF && (data == SER_XOFF || data == SER_XON))
+                    {
+                        com->tx_flow_on = data == SER_XON;
+                        if(!SER_TX_BUFFER_EMPTY(com) && com->tx_flow_on)
+                            UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) | UART_IER_TX_HOLD_EMPTY);
+                    }
+
+                    /* Store it if there's room, or throw it out */
+                    else if(!SER_RX_BUFFER_FULL(com))
+                    {
+                        SER_RX_BUFFER_WRITE(com, data);
+
+                        /* Flow control (RX) - Turn off if buffer almost full */
+                        if(com->rx_flow_on && SER_RX_BUFFER_HIWATER(com))
+                        {
+                            com->rx_flow_on = 0;
+
+                            switch(com->flow_mode)
+                            {
+                                case SER_HANDSHAKING_RTSCTS:
+                                    UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) & ~UART_MCR_RTS);
+                                    break;
+                                case SER_HANDSHAKING_NONE:
+                                    break;
+                                case SER_HANDSHAKING_XONXOFF:
+                                    UART_WRITE_DATA(com, SER_XOFF);
+                                    break;
+                                case SER_HANDSHAKING_DTRDSR:
+                                    UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) & ~UART_MCR_DTR);
+                                    break;
+                            }
+                        }
+                    }
+                }
+                break;
+            /* Change in line status */
+            case UART_IIR_LINE_STATUS:
+                UART_READ_LINE_STATUS(com);
+                break;
+            /* Change in modem status */
+            case UART_IIR_MODEM_STATUS:
+                UART_READ_MODEM_STATUS(com);
+
+                /* Handle RTS/CTS or DSR/DTR flow control (TX) */
+                if(com->flow_mode == SER_HANDSHAKING_RTSCTS)
+                    com->tx_flow_on = (com->msr & UART_MSR_CTS) != 0;
+                else if(com->flow_mode == SER_HANDSHAKING_DTRDSR)
+                    com->tx_flow_on = (com->msr & UART_MSR_DSR) != 0;
+                if(!SER_TX_BUFFER_EMPTY(com) && com->tx_flow_on)
+                    UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) | UART_IER_TX_HOLD_EMPTY);
+                break;
+            /* UART is empty */
+            case UART_IIR_TX_HOLD_EMPTY:
+            {
+                int cnt;
+                for (cnt=0; cnt<UART_FIFO_SIZE_IN_BYTES && com->tx_flow_on && !SER_TX_BUFFER_EMPTY(com); cnt++)
+                    UART_WRITE_DATA(com, SER_TX_BUFFER_READ(com));
+                if(SER_TX_BUFFER_EMPTY(com) || !com->tx_flow_on)
+                    UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) & ~UART_IER_TX_HOLD_EMPTY);
+                break;
+            }
+        }
+    }
+}
+
 static void Interrupt com_general_isr(void)
 {
     serial_struct* com_min = (serial_struct*)(g_comports);
     serial_struct* com_max = com_min + COM_MAX;
-    unsigned char int_id;
-    unsigned char data;
     unsigned char slave_interrupted = 0;
     serial_struct* com;
 
@@ -391,85 +470,8 @@ static void Interrupt com_general_isr(void)
 
     /* Process all pending interrupts */
     for(com=com_min;com<=com_max;com++)
-    {
         if(com->open)
-        {
-            while((int_id=UART_READ_INTERRUPT_IDENTIFY(com) & UART_IIR_MASK) != UART_IIR_NO_INTERRUPT)
-            {
-                switch(int_id)
-                {
-                    case UART_IIR_DATA_READY:
-                        /* Read all data from the UART */
-                        while(UART_READ_LINE_STATUS(com) & UART_LSR_DATA_READY)
-                        {
-                            data = UART_READ_DATA(com);
-
-                            /* Handle XON/XOFF flow control (TX) */
-                            if(com->flow_mode == SER_HANDSHAKING_XONXOFF && (data == SER_XOFF || data == SER_XON))
-                            {
-                                com->tx_flow_on = data == SER_XON;
-                                if(!SER_TX_BUFFER_EMPTY(com) && com->tx_flow_on)
-                                    UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) | UART_IER_TX_HOLD_EMPTY);
-                            }
-
-                            /* Store it if there's room, or throw it out */
-                            else if(!SER_RX_BUFFER_FULL(com))
-                            {
-                                SER_RX_BUFFER_WRITE(com, data);
-
-                                /* Flow control (RX) - Turn off if buffer almost full */
-                                if(com->rx_flow_on && SER_RX_BUFFER_HIWATER(com))
-                                {
-                                    com->rx_flow_on = 0;
-
-                                    switch(com->flow_mode)
-                                    {
-                                        case SER_HANDSHAKING_RTSCTS:
-                                            UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) & ~UART_MCR_RTS);
-                                            break;
-                                        case SER_HANDSHAKING_NONE:
-                                            break;
-                                        case SER_HANDSHAKING_XONXOFF:
-                                            UART_WRITE_DATA(com, SER_XOFF);
-                                            break;
-                                        case SER_HANDSHAKING_DTRDSR:
-                                            UART_WRITE_MODEM_CONTROL(com, UART_READ_MODEM_CONTROL(com) & ~UART_MCR_DTR);
-                                            break;
-                                    }
-                                }
-                            }
-                        }
-                        break;
-                    /* Change in line status */
-                    case UART_IIR_LINE_STATUS:
-                        UART_READ_LINE_STATUS(com);
-                        break;
-                    /* Change in modem status */
-                    case UART_IIR_MODEM_STATUS:
-                        UART_READ_MODEM_STATUS(com);
-
-                        /* Handle RTS/CTS or DSR/DTR flow control (TX) */
-                        if(com->flow_mode == SER_HANDSHAKING_RTSCTS)
-                            com->tx_flow_on = (com->msr & UART_MSR_CTS) != 0;
-                        else if(com->flow_mode == SER_HANDSHAKING_DTRDSR)
-                            com->tx_flow_on = (com->msr & UART_MSR_DSR) != 0;
-                        if(!SER_TX_BUFFER_EMPTY(com) && com->tx_flow_on)
-                            UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) | UART_IER_TX_HOLD_EMPTY);
-                        break;
-                    /* UART is empty */
-                    case UART_IIR_TX_HOLD_EMPTY:
-                    {
-                        int cnt;
-                        for (cnt=0; cnt<UART_FIFO_SIZE_IN_BYTES && com->tx_flow_on && !SER_TX_BUFFER_EMPTY(com); cnt++)
-                            UART_WRITE_DATA(com, SER_TX_BUFFER_READ(com));
-                        if(SER_TX_BUFFER_EMPTY(com) || !com->tx_flow_on)
-                            UART_WRITE_INTERRUPT_ENABLE(com, UART_READ_INTERRUPT_ENABLE(com) & ~UART_IER_TX_HOLD_EMPTY);
-                        break;
-                    }
-                }
-            }
-        }
-    }
+            service_port(com);
 
     CPU_DISABLE_INTERRUPTS();
 
@@ -911,6 +913,10 @@ int serial_open(int comport, long bps, int data_bits, char parity, int stop_bits
         /* Get some info */
         UART_READ_LINE_STATUS(com);
         UART_READ_MODEM_STATUS(com);
+        if(com->flow_mode == SER_HANDSHAKING_RTSCTS)
+            com->tx_flow_on = (com->msr & UART_MSR_CTS) != 0;
+        else if(com->flow_mode == SER_HANDSHAKING_DTRDSR)
+            com->tx_flow_on = (com->msr & UART_MSR_DSR) != 0;
     }
 
     /* Re-enable interrupts */
@@ -1033,6 +1039,67 @@ int serial_write_buffered(int comport, const char* data, int len)
     CPU_ENABLE_INTERRUPTS();
 
     return i;
+}
+
+int serial_read_direct(int comport, char* data, int len)
+{
+    serial_struct* com = (serial_struct*)(g_comports + comport);
+    int i;
+
+    if(comport < COM_MIN || comport > COM_MAX)
+        return SER_ERR_INVALID_COMPORT;
+    if(!com->open)
+        return SER_ERR_NOT_OPEN;
+    if(data == 0)
+        return SER_ERR_NULL_PTR;
+
+    CPU_DISABLE_INTERRUPTS();
+    for(i=0;i < len;i++)
+    {
+        if(!(UART_READ_LINE_STATUS(com) & UART_LSR_DATA_READY))
+            break;
+        data[i] = UART_READ_DATA(com);
+    }
+    CPU_ENABLE_INTERRUPTS();
+
+    return i;
+}
+
+int serial_write_direct_ready(int comport, const char* data, int len)
+{
+    serial_struct* com = (serial_struct*)(g_comports + comport);
+    int i;
+
+    if(comport < COM_MIN || comport > COM_MAX)
+        return SER_ERR_INVALID_COMPORT;
+    if(!com->open)
+        return SER_ERR_NOT_OPEN;
+    if(data == 0)
+        return SER_ERR_NULL_PTR;
+
+    CPU_DISABLE_INTERRUPTS();
+    for(i=0;i < len;i++)
+    {
+        if(!(UART_READ_LINE_STATUS(com) & UART_LSR_TX_HOLD_EMPTY))
+            break;
+        UART_WRITE_DATA(com, data[i]);
+    }
+    CPU_ENABLE_INTERRUPTS();
+
+    return i;
+}
+
+int serial_disable_interrupts(int comport)
+{
+    serial_struct* com = (serial_struct*)(g_comports + comport);
+
+    if(comport < COM_MIN || comport > COM_MAX)
+        return SER_ERR_INVALID_COMPORT;
+    if(!com->open)
+        return SER_ERR_NOT_OPEN;
+
+    UART_WRITE_INTERRUPT_ENABLE(com, 0);
+    return SER_SUCCESS;
 }
 
 
@@ -1557,6 +1624,7 @@ int serial_get_dsr(int comport)
     if(comport < COM_MIN || comport > COM_MAX)
         return SER_ERR_INVALID_COMPORT;
 
+    UART_READ_MODEM_STATUS(com);
     return (com->msr & UART_MSR_DSR) != 0;
 }
 
@@ -1568,6 +1636,7 @@ int serial_get_cts(int comport)
     if(comport < COM_MIN || comport > COM_MAX)
         return SER_ERR_INVALID_COMPORT;
 
+    UART_READ_MODEM_STATUS(com);
     return (com->msr & UART_MSR_CTS) != 0;
 }
 
@@ -1579,6 +1648,7 @@ int serial_get_msr(int comport)
     if(comport < COM_MIN || comport > COM_MAX)
         return SER_ERR_INVALID_COMPORT;
 
+    UART_READ_MODEM_STATUS(com);
     return com->msr;
 }
 
@@ -1590,6 +1660,7 @@ int serial_get_lsr(int comport)
     if(comport < COM_MIN || comport > COM_MAX)
         return SER_ERR_INVALID_COMPORT;
 
+    UART_READ_LINE_STATUS(com);
     return com->lsr;
 }
 
@@ -1663,4 +1734,3 @@ int serial_clear_rx_buffer(int comport)
 
     return SER_SUCCESS;
 }
-

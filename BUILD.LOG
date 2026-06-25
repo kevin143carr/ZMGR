@@ -1,0 +1,63 @@
+building zmgr
+MAKE Version 3.6  Copyright (c) 1992 Borland International
+
+Available memory 15084080 bytes
+
+	copy MAKE0005.$$$ build.cfg
+ MAKE0005.$$$
+   1 File(s) copied.
+	bcc +BUILD.CFG -c zmgr.cpp 
+Borland C++  Version 3.1 Copyright (c) 1992 Borland International
+zmgr.cpp:
+
+	Available memory 4056392
+	tlink /v/x/c/P-/LC:\BC\LIB @MAKE0000.$$$
+Turbo Link  Version 5.1 Copyright (c) 1992 Borland International
+	bcc +BUILD.CFG -c memmgr.cpp fwdmgr.cpp dldmgr.cpp procman.cpp upldmgr.cpp transfer.cpp configcl.cpp serbrdg.cpp zmft.cpp 
+Borland C++  Version 3.1 Copyright (c) 1992 Borland International
+memmgr.cpp:
+fwdmgr.cpp:
+dldmgr.cpp:
+procman.cpp:
+upldmgr.cpp:
+transfer.cpp:
+configcl.cpp:
+serbrdg.cpp:
+zmft.cpp:
+
+	Available memory 3878868
+	bcc +BUILD.CFG -c execpgm.cpp secrets.cpp dosser.c 
+Borland C++  Version 3.1 Copyright (c) 1992 Borland International
+execpgm.cpp:
+secrets.cpp:
+dosser.c:
+
+	Available memory 3960232
+	if exist dosser.lib del dosser.lib
+	tlib dosser.lib +dosser.obj
+TLIB 3.02 Copyright (c) 1992 Borland International
+	tlink /v/x/c/P-/LC:\BC\LIB @MAKE0001.$$$
+Turbo Link  Version 5.1 Copyright (c) 1992 Borland International
+	bcc +BUILD.CFG -c zmser.cpp 
+Borland C++  Version 3.1 Copyright (c) 1992 Borland International
+zmser.cpp:
+
+	Available memory 3948084
+	tlink /v/x/c/P-/LC:\BC\LIB @MAKE0002.$$$
+Turbo Link  Version 5.1 Copyright (c) 1992 Borland International
+	bcc +BUILD.CFG -c serial.cpp zmdiag.cpp 
+Borland C++  Version 3.1 Copyright (c) 1992 Borland International
+serial.cpp:
+zmdiag.cpp:
+
+	Available memory 3886676
+	tlink /v/x/c/P-/LC:\BC\LIB @MAKE0003.$$$
+Turbo Link  Version 5.1 Copyright (c) 1992 Borland International
+	bcc +BUILD.CFG -c zmcfg.cpp 
+Borland C++  Version 3.1 Copyright (c) 1992 Borland International
+zmcfg.cpp:
+
+	Available memory 4103252
+	tlink /v/x/c/P-/LC:\BC\LIB @MAKE0004.$$$
+Turbo Link  Version 5.1 Copyright (c) 1992 Borland International
+finished building zmgr.exe
